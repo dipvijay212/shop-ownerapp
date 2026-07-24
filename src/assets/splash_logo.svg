@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <g transform="translate(150, 100)">
+    <path d="M10 40 L50 10 L90 40 L90 100 L10 100 Z" fill="none" stroke="#2E7D32" stroke-width="8" stroke-linejoin="round"/>
+    <rect x="35" y="60" width="30" height="40" fill="none" stroke="#2E7D32" stroke-width="8"/>
+    <path d="M0 40 L100 40" stroke="#2E7D32" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <text x="200" y="250" font-family="sans-serif" font-weight="bold" font-size="36" fill="#2E7D32" text-anchor="middle">Local Shops</text>
+  <text x="200" y="285" font-family="sans-serif" font-weight="normal" font-size="16" fill="#64748B" text-anchor="middle">Your neighborhood, delivered.</text>
+</svg>
