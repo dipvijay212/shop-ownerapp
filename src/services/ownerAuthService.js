@@ -58,7 +58,7 @@ export const ownerAuthService = {
   /**
    * Mock endpoint for POST /api/auth/owner/register
    */
-  registerOwner: async ({ name, email, phone, shopName, shopAddress, shopCategory, shopLatitude, shopLongitude, shopBannerUrl, deliveryPolygon }) => {
+  registerOwner: async ({ name, email, phone, shopName, shopPhone, shopAddress, shopCategory, shopLatitude, shopLongitude, shopBannerUrl, deliveryPolygon }) => {
     await delay(1200); // Simulate network delay
 
     const ownerId = `owner_${Date.now()}`;
@@ -75,6 +75,7 @@ export const ownerAuthService = {
     const newShop = {
       id: shopId,
       name: shopName,
+      phone: shopPhone || phone,
       status: 'active',
       banner_url: shopBannerUrl || 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=800',
       address: shopAddress,

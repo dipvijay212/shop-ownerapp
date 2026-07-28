@@ -221,10 +221,32 @@ export const DeliveryAreaScreen = () => {
     });
   };
 
+  const getZoomForRadius = (km) => {
+    if (km <= 1) return 14.2;
+    if (km <= 2) return 13.2;
+    if (km <= 3) return 12.6;
+    if (km <= 5) return 11.8;
+    if (km <= 8) return 11.1;
+    if (km <= 10) return 10.8;
+    if (km <= 15) return 10.2;
+    return 9.7;
+  };
+
+  const updateRadiusWithZoom = (newVal) => {
+    setRadiusKm(newVal);
+    if (mapCameraRef.current && shopLoc.latitude && shopLoc.longitude) {
+      mapCameraRef.current.flyTo({
+        center: [shopLoc.longitude, shopLoc.latitude],
+        zoom: getZoomForRadius(newVal),
+        duration: 600,
+      });
+    }
+  };
+
   // Radius adjustment
   const handleAdjustRadius = (value) => {
     const newVal = Math.max(0.5, Math.min(25, parseFloat((radiusKm + value).toFixed(1))));
-    setRadiusKm(newVal);
+    updateRadiusWithZoom(newVal);
   };
 
   // Custom polygon edit actions
@@ -538,7 +560,7 @@ export const DeliveryAreaScreen = () => {
                   const pct = Math.max(0, Math.min(1, x / trackWidth));
                   // map to 0.5km - 20km range
                   const calculated = Math.max(0.5, Math.min(20, Math.round((0.5 + pct * 19.5) * 2) / 2));
-                  setRadiusKm(calculated);
+                  updateRadiusWithZoom(calculated);
                 }}
               >
                 <View style={styles.sliderTrack}>
@@ -556,7 +578,7 @@ export const DeliveryAreaScreen = () => {
                 <TouchableOpacity
                   key={opt.value}
                   style={[styles.chip, radiusKm === opt.value && styles.chipActive]}
-                  onPress={() => setRadiusKm(opt.value)}
+                  onPress={() => updateRadiusWithZoom(opt.value)}
                 >
                   <Text style={[styles.chipText, radiusKm === opt.value && styles.chipTextActive]}>
                     {opt.label}

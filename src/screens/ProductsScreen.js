@@ -13,6 +13,7 @@ import {
   ScrollView,
   FlatList,
   Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import {
   Plus,
@@ -24,11 +25,11 @@ import {
   Package,
   Trash2,
   ChevronLeft,
+  ChevronDown,
+  Check,
   Tag,
   Eye,
-  Copy,
   Edit,
-  X,
   Sparkles,
 } from 'lucide-react-native';
 import {
@@ -43,8 +44,31 @@ import Toast from 'react-native-toast-message';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const UNITS = ['kg', 'g', 'L', 'mL', 'piece', 'pack'];
-const CATEGORIES = ['All', 'Vegetables', 'Fruits', 'Dairy', 'Staples', 'Other'];
+const UNIT_OPTIONS = [
+  { value: 'kg', label: 'Kilogram (kg)', symbol: 'kg' },
+  { value: 'g', label: 'Gram (g)', symbol: 'g' },
+  { value: 'L', label: 'Liter (L)', symbol: 'L' },
+  { value: 'mL', label: 'Milliliter (mL)', symbol: 'mL' },
+  { value: 'piece', label: 'Piece / Item', symbol: 'pc' },
+  { value: 'pack', label: 'Pack / Bundle', symbol: 'pk' },
+  { value: 'dozen', label: 'Dozen (12 pcs)', symbol: 'doz' },
+  { value: '5kg bag', label: '5 Kilogram Bag', symbol: '5kg' },
+  { value: '10kg bag', label: '10 Kilogram Bag', symbol: '10kg' },
+];
+const DEFAULT_FORM_CATEGORIES = [
+  'Vegetables',
+  'Fruits',
+  'Dairy & Breakfast',
+  'Staples & Grains',
+  'Beverages & Drinks',
+  'Snacks & Biscuits',
+  'Bakery & Sweets',
+  'Personal Care',
+  'Cleaning & Household',
+  'Baby Care',
+  'Frozen Foods',
+  'Other',
+];
 
 export const ProductsScreen = () => {
   const insets = useSafeAreaInsets();
@@ -64,7 +88,21 @@ export const ProductsScreen = () => {
   const [formCategory, setFormCategory] = useState('Vegetables');
   const [formImage, setFormImage] = useState(null);
   const [formDesc, setFormDesc] = useState('');
+  const [showUnitDropdown, setShowUnitDropdown] = useState(false);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const filterCategories = useMemo(() => {
+    const custom = products.map(p => p.category).filter(c => c && c !== 'All');
+    const defaults = ['Vegetables', 'Fruits', 'Dairy', 'Staples', 'Other'];
+    return ['All', ...new Set([...defaults, ...custom])];
+  }, [products]);
+
+  const formCategoryOptions = useMemo(() => {
+    const custom = products.map(p => p.category).filter(Boolean);
+    return Array.from(new Set([...DEFAULT_FORM_CATEGORIES, ...custom])).sort();
+  }, [products]);
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
@@ -129,6 +167,9 @@ export const ProductsScreen = () => {
     setFormCategory('Vegetables');
     setFormImage(null);
     setFormDesc('');
+    setShowUnitDropdown(false);
+    setShowCategoryDropdown(false);
+    setCategorySearchQuery('');
     setViewMode('add');
   };
 
@@ -141,6 +182,9 @@ export const ProductsScreen = () => {
     setFormCategory(product.category || 'Vegetables');
     setFormImage(product.image_url);
     setFormDesc(product.description || 'Premium quality fresh stock sourced directly.');
+    setShowUnitDropdown(false);
+    setShowCategoryDropdown(false);
+    setCategorySearchQuery('');
     setViewMode('edit');
   };
 
@@ -219,20 +263,6 @@ export const ProductsScreen = () => {
     }
   };
 
-  const handleDuplicate = (product) => {
-    const dup = {
-      ...product,
-      id: Date.now(),
-      name: `${product.name} (Copy)`,
-    };
-    setProducts(prev => [...prev, dup]);
-    Toast.show({
-      type: 'success',
-      text1: 'Product Duplicated',
-      text2: `Successfully duplicated "${product.name}".`,
-    });
-  };
-
   // Filtered Products
   const processedProducts = useMemo(() => {
     let result = [...products];
@@ -270,7 +300,7 @@ export const ProductsScreen = () => {
 
           {/* Horizontal Category Chips */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={{ paddingRight: 16 }}>
-            {CATEGORIES.map(cat => (
+            {filterCategories.map(cat => (
               <TouchableOpacity
                 key={cat}
                 style={[styles.filterChip, selectedCategory === cat && styles.filterChipActive]}
@@ -343,9 +373,6 @@ export const ProductsScreen = () => {
                     <TouchableOpacity style={styles.actBtn} onPress={() => handleOpenDetails(item)}>
                       <Eye size={16} color={theme.colors.textLight} />
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actBtn, { marginLeft: 8 }]} onPress={() => handleDuplicate(item)}>
-                      <Copy size={16} color={theme.colors.primary} />
-                    </TouchableOpacity>
                     <TouchableOpacity style={[styles.actBtn, { marginLeft: 8 }]} onPress={() => handleOpenEdit(item)}>
                       <Edit size={16} color="#2563EB" />
                     </TouchableOpacity>
@@ -379,7 +406,13 @@ export const ProductsScreen = () => {
           <View style={{ width: 40 }} />
         </View>
 
-        <ScrollView style={styles.formScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 20}>
+          <ScrollView
+            style={styles.formScroll}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 340, flexGrow: 1 }}
+            keyboardShouldPersistTaps="handled"
+          >
           <Text style={styles.inputLabel}>Product Photo</Text>
           {formImage ? (
             <View style={styles.formImgContainer}>
@@ -432,36 +465,172 @@ export const ProductsScreen = () => {
             </View>
           </View>
 
-          <Text style={styles.formLabel}>Measurement Unit *</Text>
-          <View style={styles.unitsGrid}>
-            {UNITS.map(unit => (
-              <TouchableOpacity
-                key={unit}
-                style={[styles.unitChip, formUnit === unit && styles.unitChipActive]}
-                onPress={() => setFormUnit(unit)}
-              >
-                <Text style={[styles.unitChipText, formUnit === unit && styles.unitChipTextActive]}>
-                  {unit}
+          <View style={styles.inputGroup}>
+            <Text style={styles.formLabel}>Measurement Unit *</Text>
+            <TouchableOpacity 
+              style={[styles.dropdownBtn, showUnitDropdown && styles.dropdownBtnOpen]} 
+              onPress={() => {
+                setShowUnitDropdown(!showUnitDropdown);
+                setShowCategoryDropdown(false);
+              }}
+              activeOpacity={0.8}
+            >
+              <View style={styles.dropdownBtnLeft}>
+                <View style={styles.symbolBadge}>
+                  <Text style={styles.symbolBadgeText}>
+                    {UNIT_OPTIONS.find(u => u.value === formUnit)?.symbol || formUnit}
+                  </Text>
+                </View>
+                <Text style={styles.dropdownBtnText}>
+                  {UNIT_OPTIONS.find(u => u.value === formUnit)?.label || formUnit}
                 </Text>
-              </TouchableOpacity>
-            ))}
+              </View>
+              <ChevronDown size={20} color={theme.colors.textDark} style={{ transform: [{ rotate: showUnitDropdown ? '180deg' : '0deg' }] }} />
+            </TouchableOpacity>
+
+            {showUnitDropdown && (
+              <View style={styles.dropdownList}>
+                {UNIT_OPTIONS.map((unit, index) => {
+                  const isSelected = formUnit === unit.value;
+                  return (
+                    <TouchableOpacity
+                      key={unit.value}
+                      style={[
+                        styles.dropdownItem,
+                        isSelected && styles.dropdownItemSelected,
+                        index === UNIT_OPTIONS.length - 1 && { borderBottomWidth: 0 }
+                      ]}
+                      onPress={() => {
+                        setFormUnit(unit.value);
+                        setShowUnitDropdown(false);
+                      }}
+                    >
+                      <View style={styles.dropdownItemLeft}>
+                        <View style={[styles.symbolBadge, isSelected && styles.symbolBadgeActive]}>
+                          <Text style={[styles.symbolBadgeText, isSelected && styles.symbolBadgeTextActive]}>
+                            {unit.symbol}
+                          </Text>
+                        </View>
+                        <Text style={[styles.dropdownItemLabel, isSelected && styles.dropdownItemLabelActive]}>
+                          {unit.label}
+                        </Text>
+                      </View>
+                      {isSelected && <Check size={18} color={theme.colors.primary} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.formLabel}>Category Group *</Text>
-            <View style={styles.categoriesGrid}>
-              {CATEGORIES.filter(c => c !== 'All').map(cat => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[styles.categoryGridItem, formCategory === cat && styles.categoryGridItemSelected]}
-                  onPress={() => setFormCategory(cat)}
-                >
-                  <Text style={[styles.categoryGridText, formCategory === cat && styles.categoryGridTextSelected]}>
-                    {cat}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <TouchableOpacity
+              style={[styles.dropdownBtn, showCategoryDropdown && styles.dropdownBtnOpen]}
+              onPress={() => {
+                setShowCategoryDropdown(!showCategoryDropdown);
+                setShowUnitDropdown(false);
+              }}
+              activeOpacity={0.8}
+            >
+              <View style={styles.dropdownBtnLeft}>
+                <View style={[styles.symbolBadge, { backgroundColor: '#EFF6FF' }]}>
+                  <Tag size={18} color="#2563EB" />
+                </View>
+                <Text style={styles.dropdownBtnText}>{formCategory || 'Select or add category...'}</Text>
+              </View>
+              <ChevronDown size={20} color={theme.colors.textDark} style={{ transform: [{ rotate: showCategoryDropdown ? '180deg' : '0deg' }] }} />
+            </TouchableOpacity>
+
+            {showCategoryDropdown && (
+              <View style={styles.dropdownList}>
+                {/* Search / Custom Input Bar */}
+                <View style={styles.catSearchContainer}>
+                  <Search size={18} color={theme.colors.textLight} style={{ marginRight: 8 }} />
+                  <TextInput
+                    style={styles.catSearchInput}
+                    placeholder="Search or type custom category..."
+                    placeholderTextColor={theme.colors.textLight}
+                    value={categorySearchQuery}
+                    onChangeText={setCategorySearchQuery}
+                    numberOfLines={1}
+                    multiline={false}
+                  />
+                  {categorySearchQuery.trim().length > 0 && (
+                    <TouchableOpacity onPress={() => setCategorySearchQuery('')}>
+                      <Text style={{ color: theme.colors.textLight, fontWeight: '700', fontSize: 14 }}>Clear</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled={true}>
+                  {/* Custom Category Add Option if query doesn't exactly match an existing category */}
+                  {categorySearchQuery.trim().length > 0 && !formCategoryOptions.some(c => c.toLowerCase() === categorySearchQuery.trim().toLowerCase()) && (
+                    <TouchableOpacity
+                      style={styles.customCatItem}
+                      onPress={() => {
+                        const newCat = categorySearchQuery.trim();
+                        setFormCategory(newCat);
+                        setCategorySearchQuery('');
+                        setShowCategoryDropdown(false);
+                      }}
+                    >
+                      <View style={styles.dropdownItemLeft}>
+                        <View style={styles.addCustomBadge}>
+                          <Plus size={16} color="#FFFFFF" />
+                        </View>
+                        <Text style={styles.customCatLabel}>
+                          Add custom: "{categorySearchQuery.trim()}"
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Filtered Preset & Existing Categories */}
+                  {formCategoryOptions
+                    .filter(cat => cat.toLowerCase().includes(categorySearchQuery.trim().toLowerCase()))
+                    .map((cat, index, arr) => {
+                      const isSelected = formCategory === cat;
+                      return (
+                        <TouchableOpacity
+                          key={cat}
+                          style={[
+                            styles.dropdownItem,
+                            isSelected && styles.dropdownItemSelected,
+                            index === arr.length - 1 && { borderBottomWidth: 0 }
+                          ]}
+                          onPress={() => {
+                            setFormCategory(cat);
+                            setCategorySearchQuery('');
+                            setShowCategoryDropdown(false);
+                          }}
+                        >
+                          <View style={styles.dropdownItemLeft}>
+                            <View style={[styles.symbolBadge, isSelected && styles.symbolBadgeActive]}>
+                              <Text style={[styles.symbolBadgeText, isSelected && styles.symbolBadgeTextActive, { fontSize: 12 }]}>
+                                {cat.slice(0, 3).toUpperCase()}
+                              </Text>
+                            </View>
+                            <Text style={[styles.dropdownItemLabel, isSelected && styles.dropdownItemLabelActive]}>
+                              {cat}
+                            </Text>
+                          </View>
+                          {isSelected && <Check size={18} color={theme.colors.primary} />}
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                  {/* No results message when search matches nothing and option above is shown */}
+                  {formCategoryOptions.filter(cat => cat.toLowerCase().includes(categorySearchQuery.trim().toLowerCase())).length === 0 && (
+                    <View style={{ padding: 16, alignItems: 'center' }}>
+                      <Text style={{ color: '#64748B', fontSize: 13, textAlign: 'center' }}>
+                        No preset category matching "{categorySearchQuery.trim()}". Tap option above to add it as custom!
+                      </Text>
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
+            )}
           </View>
 
           <View style={styles.inputGroup}>
@@ -484,7 +653,8 @@ export const ProductsScreen = () => {
               <Text style={styles.submitBtnText}>Save Product Catalog</Text>
             )}
           </TouchableOpacity>
-        </ScrollView>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
@@ -887,59 +1057,129 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
   },
-  unitsGrid: {
+  dropdownBtn: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 16,
-  },
-  unitChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    marginRight: 6,
-    marginBottom: 6,
-  },
-  unitChipActive: {
-    backgroundColor: theme.colors.primaryLight,
-    borderColor: theme.colors.primary,
-  },
-  unitChipText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: theme.colors.textLight,
-  },
-  unitChipTextActive: {
-    color: theme.colors.primary,
-  },
-  categoriesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  categoryGridItem: {
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1.5,
-    borderColor: theme.colors.border,
-    width: '31%',
-    paddingVertical: 10,
-    borderRadius: 12,
     alignItems: 'center',
-    marginBottom: 8,
+    justifyContent: 'space-between',
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    borderRadius: 14,
+    height: 54,
+    paddingHorizontal: 14,
   },
-  categoryGridItemSelected: {
-    backgroundColor: theme.colors.primaryLight,
+  dropdownBtnOpen: {
     borderColor: theme.colors.primary,
+    backgroundColor: '#F0FDF4',
   },
-  categoryGridText: {
+  dropdownBtnLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  symbolBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    marginRight: 10,
+    minWidth: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  symbolBadgeActive: {
+    backgroundColor: '#DCFCE7',
+  },
+  symbolBadgeText: {
     fontSize: 13,
     fontWeight: '800',
-    color: theme.colors.textLight,
+    color: '#475569',
   },
-  categoryGridTextSelected: {
-    color: theme.colors.primary,
+  symbolBadgeTextActive: {
+    color: '#16A34A',
+  },
+  dropdownBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.colors.textDark,
+  },
+  dropdownList: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    borderRadius: 14,
+    marginTop: 8,
+    overflow: 'hidden',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  dropdownItemSelected: {
+    backgroundColor: '#F7FEE7',
+  },
+  dropdownItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dropdownItemLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  dropdownItemLabelActive: {
+    fontWeight: '800',
+    color: '#16A34A',
+  },
+  catSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    paddingHorizontal: 12,
+    height: 46,
+  },
+  catSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: theme.colors.textDark,
+    height: '100%',
+    fontWeight: '600',
+    paddingVertical: 0,
+    includeFontPadding: false,
+  },
+  customCatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: '#DCFCE7',
+    borderBottomWidth: 1,
+    borderBottomColor: '#BBF7D0',
+  },
+  addCustomBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#16A34A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  customCatLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#15803D',
   },
   submitBtn: {
     backgroundColor: theme.colors.primary,

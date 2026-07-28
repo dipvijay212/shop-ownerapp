@@ -33,6 +33,7 @@ import { AuthContext } from '../context/AuthContext';
 import { theme } from '../theme';
 import Toast from 'react-native-toast-message';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CollapsibleOrderItems } from '../components/CollapsibleOrderItems';
 
 const ORDER_FILTERS = [
   { label: 'All', value: 'all' },
@@ -147,19 +148,32 @@ export const OrdersScreen = () => {
         result = result.filter(o => o.payment_method?.toLowerCase() === activeFilter);
       } else if (activeFilter === 'accepted') {
         result = result.filter(o => o.status === 'accepted' || o.status === 'preparing');
+      } else if (activeFilter === 'rejected' || activeFilter === 'cancelled') {
+        result = result.filter(o => o.status === 'rejected' || o.status === 'cancelled');
       } else {
         result = result.filter(o => o.status === activeFilter);
       }
     }
 
-    // Search bar logic
+    // Search bar logic (Customer Name, Order ID, Customer Mobile Number)
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(o => 
-        o.orderNumber?.toLowerCase().includes(q) || 
-        o.customer_name?.toLowerCase().includes(q) ||
-        o.id.toString().includes(q)
-      );
+      const q = searchQuery.toLowerCase().trim();
+      const qNoHash = q.replace(/^#/, '');
+      const qDigits = q.replace(/\D/g, '');
+      
+      result = result.filter(o => {
+        const orderNum = o.orderNumber?.toLowerCase() || '';
+        const name = o.customer_name?.toLowerCase() || '';
+        const idStr = o.id ? o.id.toString() : '';
+        const phone = o.customer_phone?.toLowerCase() || '';
+        const phoneDigits = phone.replace(/\D/g, '');
+
+        const matchId = orderNum.includes(q) || orderNum.includes(qNoHash) || idStr.includes(qNoHash);
+        const matchName = name.includes(q);
+        const matchPhone = phone.includes(q) || (qDigits.length > 0 && phoneDigits.includes(qDigits));
+
+        return matchId || matchName || matchPhone;
+      });
     }
 
     // Sort order logic
@@ -185,6 +199,9 @@ export const OrdersScreen = () => {
         return { bg: '#F5F3FF', text: '#7C3AED', label: 'Out for Delivery' };
       case 'delivered':
         return { bg: '#D1FAE5', text: '#065F46', label: 'Delivered' };
+      case 'cancelled':
+      case 'rejected':
+        return { bg: '#FFE4E6', text: '#E11D48', label: 'Cancelled' };
       default:
         return { bg: '#F1F5F9', text: '#64748B', label: status };
     }
@@ -200,10 +217,13 @@ export const OrdersScreen = () => {
             <Search color={theme.colors.textLight} size={20} style={{ marginRight: 8 }} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search by Order ID or Name..."
+              placeholder="Search name, ID or mobile..."
               placeholderTextColor={theme.colors.textLight}
               value={searchQuery}
               onChangeText={setSearchQuery}
+              numberOfLines={1}
+              multiline={false}
+              allowFontScaling={false}
             />
           </View>
           <TouchableOpacity 
@@ -275,7 +295,7 @@ export const OrdersScreen = () => {
                   </View>
                   <View style={styles.customerInfo}>
                     <Text style={styles.customerName}>{item.customer_name}</Text>
-                    <Text style={styles.customerPhone}>+91 {item.customer_phone}</Text>
+                    <Text style={styles.customerPhone}>{item.customer_phone?.startsWith('+') || item.customer_phone?.startsWith('91') ? item.customer_phone : `+91 ${item.customer_phone}`}</Text>
                   </View>
                   <View style={styles.comms}>
                     <TouchableOpacity style={styles.iconBtn} onPress={() => handleCall(item.customer_phone)}>
@@ -296,9 +316,7 @@ export const OrdersScreen = () => {
                 </View>
 
                 {/* Items Summarized */}
-                <Text style={styles.itemSummary} numberOfLines={1}>
-                  {item.items?.map(it => `${it.name} (x${it.quantity})`).join(', ')}
-                </Text>
+                <CollapsibleOrderItems items={item.items} />
 
                 <View style={styles.divider} />
 
@@ -401,7 +419,7 @@ export const OrdersScreen = () => {
                 <Text style={styles.modalSectionTitle}>Customer & Address</Text>
                 <View style={styles.modalDetailCard}>
                   <Text style={styles.modalCustName}>{selectedOrder.customer_name}</Text>
-                  <Text style={styles.modalCustPhone}>Mobile: +91 {selectedOrder.customer_phone}</Text>
+                  <Text style={styles.modalCustPhone}>Mobile: {selectedOrder.customer_phone?.startsWith('+') || selectedOrder.customer_phone?.startsWith('91') ? selectedOrder.customer_phone : `+91 ${selectedOrder.customer_phone}`}</Text>
                   <Text style={styles.modalAddress}>{selectedOrder.delivery_address}</Text>
                   {selectedOrder.customer_note && (
                     <View style={styles.noteBox}>
@@ -504,10 +522,13 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
     color: theme.colors.textDark,
     height: '100%',
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   sortBtn: {
     width: 48,

@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
 import { ownerAuthService } from '../../services/ownerAuthService';
 import Toast from 'react-native-toast-message';
-import { Smartphone, Store, ShieldCheck, ChevronRight, Lock, Zap, Shield, Headphones } from 'lucide-react-native';
+import { Smartphone, Store, ShieldCheck, ChevronRight } from 'lucide-react-native';
 
 export const LoginScreen = () => {
   const navigation = useNavigation();
@@ -177,6 +177,8 @@ export const LoginScreen = () => {
                   placeholder="Enter mobile number"
                   placeholderTextColor="#94A3B8"
                   keyboardType="phone-pad"
+                  multiline={false}
+                  numberOfLines={1}
                   value={phone}
                   onChangeText={(val) => setPhone(val.replace(/[^0-9]/g, '').slice(0, 10))}
                   maxLength={10}
@@ -184,7 +186,7 @@ export const LoginScreen = () => {
                   onBlur={() => setIsFocused(false)}
                 />
 
-                <Smartphone color="#16A34A" size={18} style={{ alignSelf: 'center', marginRight: 14 }} />
+                <Smartphone color="#16A34A" size={18} style={{ alignSelf: 'center', marginRight: 12 }} />
               </View>
 
               {/* Security Banner inside Card */}
@@ -217,37 +219,6 @@ export const LoginScreen = () => {
               </Pressable>
             </View>
 
-            {/* Trust Markers Row */}
-            <View style={styles.trustRow}>
-              <View style={styles.trustItem}>
-                <View style={styles.trustIconContainer}>
-                  <Lock color="#16A34A" size={14} />
-                </View>
-                <View style={styles.trustTextSection}>
-                  <Text style={styles.trustTitle}>Secure</Text>
-                  <Text style={styles.trustSubtitle}>Bank grade security</Text>
-                </View>
-              </View>
-              <View style={styles.trustItem}>
-                <View style={styles.trustIconContainer}>
-                  <Zap color="#16A34A" size={14} />
-                </View>
-                <View style={styles.trustTextSection}>
-                  <Text style={styles.trustTitle}>Fast</Text>
-                  <Text style={styles.trustSubtitle}>Instant verification</Text>
-                </View>
-              </View>
-              <View style={styles.trustItem}>
-                <View style={styles.trustIconContainer}>
-                  <Shield color="#16A34A" size={14} />
-                </View>
-                <View style={styles.trustTextSection}>
-                  <Text style={styles.trustTitle}>Trusted</Text>
-                  <Text style={styles.trustSubtitle}>Used by 10K+ shops</Text>
-                </View>
-              </View>
-            </View>
-
             {/* Legalese Footer Links */}
             <Text style={styles.legaleseText}>
               By continuing, you agree to our{' '}
@@ -266,19 +237,8 @@ export const LoginScreen = () => {
               </Text>
             </Text>
 
-            {/* Bottom Support & Version Footer */}
+            {/* Version Footer */}
             <View style={styles.footerRow}>
-              <TouchableOpacity 
-                style={styles.supportBtn}
-                onPress={() => Toast.show({ type: 'info', text1: 'Support Helpline', text2: 'support@antigravity.in' })}
-              >
-                <Headphones color="#16A34A" size={16} style={{ marginRight: 6 }} />
-                <View>
-                  <Text style={styles.supportTitle}>Need help?</Text>
-                  <Text style={styles.supportSubtitle}>Contact Support</Text>
-                </View>
-              </TouchableOpacity>
-              
               <Text style={styles.versionText}>v1.0.0</Text>
             </View>
 
@@ -500,12 +460,12 @@ const styles = StyleSheet.create({
   countryPicker: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     backgroundColor: '#F8FAFC',
   },
   flagEmoji: {
     fontSize: 16,
-    marginRight: 6,
+    marginRight: 5,
   },
   countryCode: {
     fontSize: 14,
@@ -533,8 +493,8 @@ const styles = StyleSheet.create({
   textInput: {
     flex: 1,
     paddingVertical: 0,
-    paddingHorizontal: 12,
-    fontSize: 15,
+    paddingHorizontal: 10,
+    fontSize: 14,
     fontWeight: '700',
     color: '#0F172A',
   },
@@ -588,38 +548,6 @@ const styles = StyleSheet.create({
   buttonChevron: {
     alignSelf: 'center',
   },
-  trustRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 24,
-    paddingHorizontal: 4,
-  },
-  trustItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  trustIconContainer: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#DCFCE7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 6,
-  },
-  trustTextSection: {
-    justifyContent: 'center',
-  },
-  trustTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  trustSubtitle: {
-    fontSize: 8,
-    color: '#64748B',
-    fontWeight: '600',
-  },
   legaleseText: {
     fontSize: 11,
     color: '#94A3B8',
@@ -635,28 +563,9 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   footerRow: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 36,
-    borderTopWidth: 1.2,
-    borderTopColor: '#E2E8F0',
-    paddingTop: 16,
-  },
-  supportBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  supportTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  supportSubtitle: {
-    fontSize: 10,
-    color: '#64748B',
-    fontWeight: '600',
-    marginTop: 1,
+    justifyContent: 'center',
+    marginTop: 24,
   },
   versionText: {
     fontSize: 11,

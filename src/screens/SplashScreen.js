@@ -1,60 +1,47 @@
-import React, { useEffect } from 'react';
-import { View, StyleSheet, Text, ActivityIndicator, Dimensions } from 'react-native';
-import Animated, { 
-  useSharedValue, 
-  useAnimatedStyle, 
-  withTiming, 
-  withDelay, 
-  withSpring,
-  Easing
-} from 'react-native-reanimated';
+import React, { useEffect, useRef } from 'react';
+import { View, StyleSheet, Text, ActivityIndicator, Dimensions, Animated, Easing } from 'react-native';
 import { Store } from 'lucide-react-native';
+import BootSplash from 'react-native-bootsplash';
 import { theme } from '../theme';
 
 const { width } = Dimensions.get('window');
 
 export const SplashScreen = () => {
-  const iconScale = useSharedValue(0);
-  const textOpacity = useSharedValue(0);
-  const textTranslateY = useSharedValue(20);
+  const iconScale = useRef(new Animated.Value(0.85)).current;
+  const contentOpacity = useRef(new Animated.Value(1)).current;
+  const textTranslateY = useRef(new Animated.Value(8)).current;
 
   useEffect(() => {
-    // Animate icon pop
-    iconScale.value = withSpring(1, { damping: 12, stiffness: 90 });
-    
-    // Fade and slide up text
-    textOpacity.value = withDelay(
-      300, 
-      withTiming(1, { duration: 800, easing: Easing.out(Easing.exp) })
-    );
-    textTranslateY.value = withDelay(
-      300, 
-      withTiming(0, { duration: 800, easing: Easing.out(Easing.exp) })
-    );
-  }, [iconScale, textOpacity, textTranslateY]);
+    // Keep BootSplash visible until React Native is fully ready, then immediately
+    // transition to custom SplashScreen without showing any intermediate loading screen.
+    BootSplash.hide({ fade: false });
 
-  const animatedIconStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ scale: iconScale.value }],
-    };
-  });
-
-  const animatedTextStyle = useAnimatedStyle(() => {
-    return {
-      opacity: textOpacity.value,
-      transform: [{ translateY: textTranslateY.value }],
-    };
-  });
+    // Smoothly animate the store icon and branding into final position using Native Driver
+    Animated.parallel([
+      Animated.spring(iconScale, {
+        toValue: 1,
+        friction: 5,
+        tension: 80,
+        useNativeDriver: true,
+      }),
+      Animated.timing(textTranslateY, {
+        toValue: 0,
+        duration: 450,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [iconScale, textTranslateY]);
 
   return (
     <View style={styles.container}>
       {/* Central Shop Icon */}
-      <Animated.View style={[styles.iconContainer, animatedIconStyle]}>
+      <Animated.View style={[styles.iconContainer, { transform: [{ scale: iconScale }] }]}>
         <Store color={theme.colors.primary} size={70} strokeWidth={2.5} />
       </Animated.View>
 
       {/* App Branding */}
-      <Animated.View style={[styles.textContainer, animatedTextStyle]}>
+      <Animated.View style={[styles.textContainer, { opacity: contentOpacity, transform: [{ translateY: textTranslateY }] }]}>
         <Text style={styles.title}>Local Shops</Text>
         
         {/* Owner/Business Badge */}

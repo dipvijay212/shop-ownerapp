@@ -39,11 +39,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthContext } from '../context/AuthContext';
 import {
-  getMockReviews,
-  getMockNotifications,
-  markMockNotificationRead,
   resetMockOwnerStorage,
-  simulateNewMockOrder,
   getMockShop,
   updateMockShopStatus,
 } from '../mockOwnerData';
@@ -53,19 +49,20 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 
-export const ProfileScreen = () => {
+export const ProfileScreen = ({ route }) => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { owner, shop, logout, updateShopState, checkNewOrders } = useContext(AuthContext);
 
   // viewMode: 'more' | 'edit_shop' | 'reviews' | 'notifications' | 'hours' | 'delivery' | 'subscription'
-  const [viewMode, setViewMode] = useState('more');
+  const [viewMode, setViewMode] = useState(route?.params?.initialMode || 'more');
 
-  // Lists & States
-  const [reviews, setReviews] = useState([]);
-  const [notifications, setNotifications] = useState([]);
-  const [loadingReviews, setLoadingReviews] = useState(false);
-  const [loadingNotifications, setLoadingNotifications] = useState(false);
+  useEffect(() => {
+    if (route?.params?.initialMode) {
+      setViewMode(route.params.initialMode);
+      navigation.setParams({ initialMode: undefined });
+    }
+  }, [route?.params?.initialMode, navigation]);
 
   // Form states
   const [editShopName, setEditShopName] = useState(shop?.name || '');
@@ -83,8 +80,38 @@ export const ProfileScreen = () => {
   const [openTime, setOpenTime] = useState('08:00 AM');
   const [closeTime, setCloseTime] = useState('10:00 PM');
   const [daysOpen, setDaysOpen] = useState({
-    Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true
+    Monday: true, Tuesday: true, Wednesday: true, Thursday: true, Friday: true, Saturday: true, Sunday: true
   });
+
+  // Time Picker Modal States
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
+  const [activeTimeField, setActiveTimeField] = useState('open'); // 'open' | 'close'
+  const [tempHour, setTempHour] = useState('08');
+  const [tempMinute, setTempMinute] = useState('00');
+  const [tempAmPm, setTempAmPm] = useState('AM');
+  const [pickerMode, setPickerMode] = useState('hour'); // 'hour' | 'minute'
+
+  const handleOpenTimePicker = (field) => {
+    setActiveTimeField(field);
+    const currentTimeString = field === 'open' ? openTime : closeTime;
+    const parts = currentTimeString.split(' ');
+    const timeParts = (parts[0] || '08:00').split(':');
+    setTempHour(timeParts[0] || '08');
+    setTempMinute(timeParts[1] || '00');
+    setTempAmPm(parts[1] || 'AM');
+    setPickerMode('hour');
+    setTimePickerVisible(true);
+  };
+
+  const handleConfirmTime = () => {
+    const formattedTime = `${tempHour}:${tempMinute} ${tempAmPm}`;
+    if (activeTimeField === 'open') {
+      setOpenTime(formattedTime);
+    } else {
+      setCloseTime(formattedTime);
+    }
+    setTimePickerVisible(false);
+  };
 
   // Settings States
   const [notifyNewOrders, setNotifyNewOrders] = useState(true);
@@ -112,35 +139,6 @@ export const ProfileScreen = () => {
       setEditBannerUri(shop.banner_url);
     }
   }, [shop]);
-
-  const fetchReviews = useCallback(async () => {
-    setLoadingReviews(true);
-    try {
-      const data = await getMockReviews();
-      setReviews(data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingReviews(false);
-    }
-  }, []);
-
-  const fetchNotifications = useCallback(async () => {
-    setLoadingNotifications(true);
-    try {
-      const data = await getMockNotifications();
-      setNotifications(data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingNotifications(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchReviews();
-    fetchNotifications();
-  }, [fetchReviews, fetchNotifications]);
 
   const handleSelectLanguage = async (lang) => {
     try {
@@ -204,20 +202,6 @@ export const ProfileScreen = () => {
       console.error(e);
     } finally {
       setSavingShop(false);
-    }
-  };
-
-  const handleSimulateNewOrder = async () => {
-    try {
-      await simulateNewMockOrder();
-      Toast.show({
-        type: 'success',
-        text1: 'Simulation Triggered',
-        text2: 'Flashed a new mock order request on Dashboard!',
-      });
-      if (checkNewOrders) checkNewOrders();
-    } catch (e) {
-      console.error(e);
     }
   };
 
@@ -311,24 +295,6 @@ export const ProfileScreen = () => {
               <ChevronRight color={theme.colors.textLight} size={20} />
             </TouchableOpacity>
 
-            <Text style={styles.menuSectionHeader}>Feedback & Logs</Text>
-
-            <TouchableOpacity style={styles.menuRow} onPress={() => setViewMode('reviews')}>
-              <View style={[styles.menuIconBg, { backgroundColor: '#F3E8FF' }]}>
-                <Star color="#9333EA" size={20} />
-              </View>
-              <Text style={styles.menuLabel}>Customer Reviews ({reviews.length})</Text>
-              <ChevronRight color={theme.colors.textLight} size={20} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuRow} onPress={() => setViewMode('notifications')}>
-              <View style={[styles.menuIconBg, { backgroundColor: '#E0F2FE' }]}>
-                <Bell color="#0369A1" size={20} />
-              </View>
-              <Text style={styles.menuLabel}>Inbox Alerts ({notifications.length})</Text>
-              <ChevronRight color={theme.colors.textLight} size={20} />
-            </TouchableOpacity>
-
             <Text style={styles.menuSectionHeader}>System Utilities</Text>
 
             <View style={styles.settingsSwitchRow}>
@@ -358,12 +324,12 @@ export const ProfileScreen = () => {
             </View>
 
             <View style={styles.langPickerRow}>
-              <View style={{ flex: 1 }}>
+              <View style={{ marginBottom: 10 }}>
                 <Text style={styles.switchLabel}>App Language</Text>
                 <Text style={styles.switchSub}>Selected: {selectedLanguage}</Text>
               </View>
-              <View style={{ flexDirection: 'row' }}>
-                {['English', 'Hindi'].map(lang => (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                {['English', 'Hindi', 'Gujarati'].map(lang => (
                   <TouchableOpacity
                     key={lang}
                     style={[styles.langBtn, selectedLanguage === lang && styles.langBtnActive]}
@@ -376,11 +342,6 @@ export const ProfileScreen = () => {
                 ))}
               </View>
             </View>
-
-            <TouchableOpacity style={styles.simOrderBtn} onPress={handleSimulateNewOrder}>
-              <Sparkles color={theme.colors.primary} size={18} style={{ marginRight: 8 }} />
-              <Text style={styles.simOrderText}>Simulate New Order Flow</Text>
-            </TouchableOpacity>
 
             <View style={styles.divider} />
 
@@ -479,21 +440,35 @@ export const ProfileScreen = () => {
           <Text style={styles.subtitleLabel}>Set store online operation window</Text>
           
           <View style={styles.timePickerCard}>
-            <View style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={styles.timePickerLabel}>Opening Time</Text>
-              <TextInput style={styles.timePickerInput} value={openTime} onChangeText={setOpenTime} />
-            </View>
-            <View style={{ width: 1.5, backgroundColor: theme.colors.border, height: '80%' }} />
-            <View style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={styles.timePickerLabel}>Closing Time</Text>
-              <TextInput style={styles.timePickerInput} value={closeTime} onChangeText={setCloseTime} />
-            </View>
+            <TouchableOpacity 
+              style={{ flex: 1, alignItems: 'center', paddingVertical: 8 }} 
+              onPress={() => handleOpenTimePicker('open')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.timePickerLabel}>OPENING TIME</Text>
+              <View style={styles.timeDisplayBtn}>
+                <Clock size={16} color={theme.colors.primary} style={{ marginRight: 6 }} />
+                <Text style={styles.timeDisplayText}>{openTime}</Text>
+              </View>
+            </TouchableOpacity>
+            <View style={{ width: 1.5, backgroundColor: theme.colors.border, height: '80%', marginHorizontal: 8 }} />
+            <TouchableOpacity 
+              style={{ flex: 1, alignItems: 'center', paddingVertical: 8 }} 
+              onPress={() => handleOpenTimePicker('close')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.timePickerLabel}>CLOSING TIME</Text>
+              <View style={styles.timeDisplayBtn}>
+                <Clock size={16} color={theme.colors.primary} style={{ marginRight: 6 }} />
+                <Text style={styles.timeDisplayText}>{closeTime}</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
           <Text style={styles.daySelectorHeader}>Weekly Schedule</Text>
           {Object.keys(daysOpen).map((day) => (
             <View key={day} style={styles.dayRow}>
-              <Text style={styles.dayName}>{day}day</Text>
+              <Text style={styles.dayName}>{day}</Text>
               <Switch
                 value={daysOpen[day]}
                 onValueChange={(val) => setDaysOpen(prev => ({ ...prev, [day]: val }))}
@@ -510,6 +485,116 @@ export const ProfileScreen = () => {
             <Text style={styles.saveBtnText}>Save Operations Timing</Text>
           </TouchableOpacity>
         </ScrollView>
+
+        {/* Interactive Time Picker Modal */}
+        <Modal
+          visible={timePickerVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setTimePickerVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.timeModalContainer}>
+              <View style={styles.timeModalHeader}>
+                <Text style={styles.timeModalTitle}>
+                  Set {activeTimeField === 'open' ? 'Opening' : 'Closing'} Time
+                </Text>
+                <TouchableOpacity onPress={() => setTimePickerVisible(false)}>
+                  <X color={theme.colors.textDark} size={22} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Big Time Preview & Selector Tabs */}
+              <View style={styles.timePreviewCard}>
+                <View style={styles.timeDigitsRow}>
+                  <TouchableOpacity
+                    style={[styles.timeDigitBox, pickerMode === 'hour' && styles.timeDigitBoxActive]}
+                    onPress={() => setPickerMode('hour')}
+                  >
+                    <Text style={[styles.timeDigitText, pickerMode === 'hour' && styles.timeDigitTextActive]}>
+                      {tempHour}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={styles.timeColon}>:</Text>
+                  <TouchableOpacity
+                    style={[styles.timeDigitBox, pickerMode === 'minute' && styles.timeDigitBoxActive]}
+                    onPress={() => setPickerMode('minute')}
+                  >
+                    <Text style={[styles.timeDigitText, pickerMode === 'minute' && styles.timeDigitTextActive]}>
+                      {tempMinute}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* AM / PM Toggle */}
+                <View style={styles.amPmContainer}>
+                  <TouchableOpacity
+                    style={[styles.amPmBtn, tempAmPm === 'AM' && styles.amPmBtnActive]}
+                    onPress={() => setTempAmPm('AM')}
+                  >
+                    <Text style={[styles.amPmText, tempAmPm === 'AM' && styles.amPmTextActive]}>AM</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.amPmBtn, tempAmPm === 'PM' && styles.amPmBtnActive]}
+                    onPress={() => setTempAmPm('PM')}
+                  >
+                    <Text style={[styles.amPmText, tempAmPm === 'PM' && styles.amPmTextActive]}>PM</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.modeInstructionRow}>
+                <Text style={styles.modeInstructionText}>
+                  {pickerMode === 'hour' ? 'Select Hour (1 - 12)' : 'Select Minute'}
+                </Text>
+              </View>
+
+              {/* Hours / Minutes Grid */}
+              <View style={styles.pickerGrid}>
+                {pickerMode === 'hour' ? (
+                  ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].map((hr) => {
+                    const isSelected = tempHour === hr;
+                    return (
+                      <TouchableOpacity
+                        key={hr}
+                        style={[styles.gridCircle, isSelected && styles.gridCircleSelected]}
+                        onPress={() => {
+                          setTempHour(hr);
+                          setPickerMode('minute');
+                        }}
+                      >
+                        <Text style={[styles.gridCircleText, isSelected && styles.gridCircleTextSelected]}>{hr}</Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                ) : (
+                  ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'].map((min) => {
+                    const isSelected = tempMinute === min;
+                    return (
+                      <TouchableOpacity
+                        key={min}
+                        style={[styles.gridCircle, isSelected && styles.gridCircleSelected]}
+                        onPress={() => setTempMinute(min)}
+                      >
+                        <Text style={[styles.gridCircleText, isSelected && styles.gridCircleTextSelected]}>{min}</Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
+
+              {/* Action buttons */}
+              <View style={styles.modalActionsRow}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setTimePickerVisible(false)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleConfirmTime}>
+                  <Text style={styles.modalConfirmText}>Confirm Time</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -567,113 +652,40 @@ export const ProfileScreen = () => {
   if (viewMode === 'subscription') {
     return (
       <View style={styles.container}>
-        {renderHeader('Partner Subscription plan')}
+        {renderHeader('Partner Subscription Plan')}
         <ScrollView style={styles.formScroll} contentContainerStyle={{ paddingBottom: insets.bottom > 0 ? insets.bottom + 30 : 45 }} showsVerticalScrollIndicator={false}>
           <View style={styles.subCard}>
-            <Sparkles color="#D97706" size={32} />
-            <Text style={styles.subCardTitle}>Gold Partner Plan</Text>
-            <Text style={styles.subCardPrice}>₹999 / month</Text>
-            <Text style={styles.subCardExpiry}>Expires: 24 December 2026</Text>
-            
+            <View style={styles.subBadgeRow}>
+              <Sparkles color="#16A34A" size={28} />
+              <View style={styles.subPillBadge}>
+                <Text style={styles.subPillText}>RECOMMENDED</Text>
+              </View>
+            </View>
+
+            <Text style={styles.subCardTitle}>Partner Pro Plan</Text>
+            <View style={styles.subPriceContainer}>
+              <Text style={styles.subPriceAmount}>Rs. 200</Text>
+              <Text style={styles.subPricePeriod}> / Month</Text>
+            </View>
+            <Text style={styles.subCardDesc}>Get complete access to all digital commerce tools with zero commission on orders.</Text>
+
             <View style={styles.subFeatureList}>
               <Text style={styles.subFeatureItem}>✓ Unlimited inventory products catalog uploads</Text>
-              <Text style={styles.subFeatureItem}>✓ Real-time custom geofence draw routing bounds</Text>
-              <Text style={styles.subFeatureItem}>✓ Custom UPI payment QR generator overlay</Text>
-              <Text style={styles.subFeatureItem}>✓ 0% commission on orders processed</Text>
+              <Text style={styles.subFeatureItem}>✓ 0% commission on all customer orders processed</Text>
+              <Text style={styles.subFeatureItem}>✓ Real-time delivery area & geofence configuration</Text>
+              <Text style={styles.subFeatureItem}>✓ Custom store QR generator & online operations</Text>
+              <Text style={styles.subFeatureItem}>✓ Complete digital Khata customer ledger access</Text>
             </View>
+
+            <TouchableOpacity
+              style={styles.subscribeBtn}
+              activeOpacity={0.8}
+              onPress={() => Toast.show({ type: 'success', text1: 'Subscription Activated', text2: 'You are subscribed to the Rs. 200/Month Partner Plan!' })}
+            >
+              <Text style={styles.subscribeBtnText}>Subscribe Now</Text>
+            </TouchableOpacity>
           </View>
-
-          <Text style={styles.otherPlansTitle}>Alternative Partner Plans</Text>
-          {[
-            { name: 'Silver Partner', price: '₹499/mo', desc: 'Up to 100 products limit. Flat delivery fee configs.' },
-            { name: 'Enterprise Platinum', price: 'Custom pricing', desc: 'Custom branding & analytics features.' },
-          ].map((plan, index) => (
-            <View key={index} style={styles.otherPlanRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.otherPlanName}>{plan.name}</Text>
-                <Text style={styles.otherPlanDesc}>{plan.desc}</Text>
-              </View>
-              <TouchableOpacity style={styles.otherPlanBuyBtn} onPress={() => Toast.show({ type: 'info', text1: 'Upgrade Plan', text2: 'Please contact support.' })}>
-                <Text style={styles.otherPlanBuyText}>Upgrade</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
         </ScrollView>
-      </View>
-    );
-  }
-
-  // VIEW MODE: CUSTOMER REVIEWS
-  if (viewMode === 'reviews') {
-    return (
-      <View style={styles.container}>
-        {renderHeader('Customer Reviews')}
-        {loadingReviews ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.primary} />
-        ) : (
-          <FlatList
-            data={reviews}
-            keyExtractor={(item) => item.id.toString()}
-            contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom > 0 ? insets.bottom + 30 : 45 }]}
-            renderItem={({ item }) => (
-              <View style={styles.reviewCard}>
-                <View style={styles.reviewHeader}>
-                  <Text style={styles.reviewUser}>{item.customer_name || 'Anonymous'}</Text>
-                  <View style={styles.starsRow}>
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star
-                        key={s}
-                        size={14}
-                        color={s <= item.rating ? '#F59E0B' : '#CBD5E1'}
-                        fill={s <= item.rating ? '#F59E0B' : 'transparent'}
-                        style={{ marginRight: 2 }}
-                      />
-                    ))}
-                  </View>
-                </View>
-                <Text style={styles.reviewComment}>{item.comment}</Text>
-                <Text style={styles.reviewDate}>{new Date(item.created_at).toLocaleDateString()}</Text>
-              </View>
-            )}
-          />
-        )}
-      </View>
-    );
-  }
-
-  // VIEW MODE: INBOX ALERTS (NOTIFICATIONS)
-  if (viewMode === 'notifications') {
-    return (
-      <View style={styles.container}>
-        {renderHeader('Inbox Alerts')}
-        {loadingNotifications ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.primary} />
-        ) : (
-          <FlatList
-            data={notifications}
-            keyExtractor={(item) => item.id.toString()}
-            contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom > 0 ? insets.bottom + 30 : 45 }]}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[styles.notificationCard, !item.read && styles.notificationUnread]}
-                onPress={async () => {
-                  if (!item.read) {
-                    await markMockNotificationRead(item.id);
-                    fetchNotifications();
-                    if (checkNewOrders) checkNewOrders();
-                  }
-                }}
-              >
-                <View style={styles.notificationInfo}>
-                  <Text style={[styles.notificationTitle, !item.read && { fontWeight: '900' }]}>{item.title}</Text>
-                  <Text style={styles.notificationBodyText}>{item.message}</Text>
-                  <Text style={styles.notificationDate}>{new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-                </View>
-                {!item.read && <View style={styles.unreadDot} />}
-              </TouchableOpacity>
-            )}
-          />
-        )}
       </View>
     );
   }
@@ -836,45 +848,33 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   langPickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: theme.colors.surface,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    padding: 12,
-    marginBottom: 8,
+    padding: 14,
+    marginBottom: 12,
   },
   langBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
     borderWidth: 1.5,
     borderColor: theme.colors.border,
-    marginLeft: 6,
+    marginRight: 8,
+    marginTop: 4,
   },
   langBtnActive: {
     backgroundColor: theme.colors.primaryLight,
     borderColor: theme.colors.primary,
   },
   langBtnText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
     color: theme.colors.textLight,
   },
   langBtnTextActive: {
     color: theme.colors.primary,
-  },
-  simOrderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: theme.colors.primary,
-    backgroundColor: '#F0FDF4',
-    marginTop: 16,
   },
   simOrderText: {
     color: theme.colors.primary,
@@ -1067,6 +1067,183 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 0,
   },
+  timeDisplayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+    backgroundColor: '#F0FDF4',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+  },
+  timeDisplayText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: theme.colors.primary,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  timeModalContainer: {
+    width: '90%',
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  timeModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  timeModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: theme.colors.textDark,
+  },
+  timePreviewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    marginBottom: 16,
+  },
+  timeDigitsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  timeDigitBox: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+  },
+  timeDigitBoxActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: '#F0FDF4',
+  },
+  timeDigitText: {
+    fontSize: 28,
+    fontWeight: '850',
+    color: theme.colors.textDark,
+  },
+  timeDigitTextActive: {
+    color: theme.colors.primary,
+  },
+  timeColon: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: theme.colors.textDark,
+    marginHorizontal: 8,
+  },
+  amPmContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    overflow: 'hidden',
+  },
+  amPmBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  amPmBtnActive: {
+    backgroundColor: theme.colors.primary,
+  },
+  amPmText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: theme.colors.textLight,
+  },
+  amPmTextActive: {
+    color: '#FFF',
+  },
+  modeInstructionRow: {
+    marginBottom: 10,
+  },
+  modeInstructionText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: theme.colors.textLight,
+  },
+  pickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  gridCircle: {
+    width: '23%',
+    aspectRatio: 1.5,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 10,
+  },
+  gridCircleSelected: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  gridCircleText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.textDark,
+  },
+  gridCircleTextSelected: {
+    color: '#FFF',
+  },
+  modalActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  modalCancelText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.colors.textLight,
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  modalConfirmText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFF',
+  },
   daySelectorHeader: {
     fontSize: 14,
     fontWeight: '850',
@@ -1091,82 +1268,98 @@ const styles = StyleSheet.create({
   },
   // Sub card styles
   subCard: {
-    backgroundColor: '#FFFBEB',
+    backgroundColor: '#FFF',
     borderWidth: 1.5,
-    borderColor: '#FEF3C7',
-    borderRadius: 20,
-    padding: 20,
-    alignItems: 'center',
+    borderColor: '#DCFCE7',
+    borderRadius: 24,
+    padding: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 4,
     marginBottom: 20,
   },
-  subCardTitle: {
-    fontSize: 22,
-    fontWeight: '850',
-    color: '#D97706',
-    marginTop: 10,
+  subBadgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 10,
   },
-  subCardPrice: {
-    fontSize: 18,
-    fontWeight: '800',
+  subPillBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  subPillText: {
+    fontSize: 11,
+    fontWeight: '850',
+    color: '#15803D',
+    letterSpacing: 0.5,
+  },
+  subCardTitle: {
+    fontSize: 24,
+    fontWeight: '850',
     color: theme.colors.textDark,
     marginTop: 4,
+    alignSelf: 'flex-start',
   },
-  subCardExpiry: {
-    fontSize: 11,
+  subPriceContainer: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  subPriceAmount: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: theme.colors.primary,
+  },
+  subPricePeriod: {
+    fontSize: 16,
     fontWeight: '700',
     color: theme.colors.textLight,
-    marginTop: 4,
+  },
+  subCardDesc: {
+    fontSize: 14,
+    color: theme.colors.textLight,
+    fontWeight: '600',
+    marginTop: 8,
+    lineHeight: 20,
   },
   subFeatureList: {
     width: '100%',
     borderTopWidth: 1,
-    borderTopColor: '#FEF3C7',
-    paddingTop: 14,
-    marginTop: 14,
+    borderTopColor: '#F1F5F9',
+    paddingTop: 18,
+    marginTop: 18,
   },
   subFeatureItem: {
-    fontSize: 13,
-    color: theme.colors.textDark,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  otherPlansTitle: {
-    fontSize: 15,
-    fontWeight: '850',
-    color: theme.colors.textDark,
-    marginBottom: 10,
-  },
-  otherPlanRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-  },
-  otherPlanName: {
     fontSize: 14,
-    fontWeight: '800',
-    color: theme.colors.textDark,
-  },
-  otherPlanDesc: {
-    fontSize: 12,
-    color: theme.colors.textLight,
-    marginTop: 2,
+    color: '#334155',
     fontWeight: '700',
+    marginBottom: 12,
   },
-  otherPlanBuyBtn: {
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
+  subscribeBtn: {
+    backgroundColor: theme.colors.primary,
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  otherPlanBuyText: {
-    fontSize: 12,
+  subscribeBtnText: {
+    fontSize: 17,
     fontWeight: '800',
-    color: theme.colors.textDark,
+    color: '#FFF',
   },
   // Reviews List & Notification Lists
   listContent: {

@@ -33,41 +33,51 @@ export const AuthProvider = ({ children }) => {
   }, [checkNewOrders]);
 
   useEffect(() => {
-    const loadStorageData = async () => {
-      try {
-        const storedToken = await AsyncStorage.getItem('owner_token');
-        const storedOwner = await AsyncStorage.getItem('owner_profile');
-        const storedShop = await AsyncStorage.getItem('owner_shop');
+    const initializeApp = async () => {
+      // Minimum display duration for custom SplashScreen animation to complete cleanly
+      const minDisplayDuration = new Promise(resolve => setTimeout(resolve, 2500));
 
-        if (storedToken) {
-          try {
-            const res = await ownerAuthService.validateToken(storedToken);
-            // Token is valid
-            setUserToken(storedToken);
-            setOwner(res.owner);
-            setShop(res.shop);
-          } catch (apiError) {
-            // Token is invalid/expired or data is missing - force logout
-            console.log('[AuthContext] Token validation failed, clearing session.');
-            await AsyncStorage.removeItem('owner_token');
-            await AsyncStorage.removeItem('owner_profile');
-            await AsyncStorage.removeItem('owner_shop');
-            setUserToken(null);
-            setOwner(null);
-            setShop(null);
+      // Perform all initialization (storage, auth validation, API & state setup) in background
+      const initTask = (async () => {
+        try {
+          const storedToken = await AsyncStorage.getItem('owner_token');
+          const storedOwner = await AsyncStorage.getItem('owner_profile');
+          const storedShop = await AsyncStorage.getItem('owner_shop');
+
+          if (storedToken) {
+            try {
+              const res = await ownerAuthService.validateToken(storedToken);
+              // Token is valid
+              setUserToken(storedToken);
+              setOwner(res.owner);
+              setShop(res.shop);
+            } catch (apiError) {
+              // Token is invalid/expired or data is missing - force logout
+              console.log('[AuthContext] Token validation failed, clearing session.');
+              await AsyncStorage.removeItem('owner_token');
+              await AsyncStorage.removeItem('owner_profile');
+              await AsyncStorage.removeItem('owner_shop');
+              setUserToken(null);
+              setOwner(null);
+              setShop(null);
+            }
           }
+        } catch (e) {
+          console.error('[AuthContext] Failed to load storage data', e);
         }
-      } catch (e) {
-        console.error('[AuthContext] Failed to load storage data', e);
-      } finally {
-        setIsLoading(false);
-      }
+      })();
+
+      // Wait for both background initialization AND minimum splash display to finish
+      await Promise.all([initTask, minDisplayDuration]);
+
+      // Transition smoothly to Onboarding, Login, or Home without flickering
+      setIsLoading(false);
     };
 
-    loadStorageData();
+    initializeApp();
   }, []);
 
-  const login = async (token, ownerData, shopData) => {
+  const login = useCallback(async (token, ownerData, shopData) => {
     try {
       await AsyncStorage.setItem('owner_token', token);
       await AsyncStorage.setItem('owner_profile', JSON.stringify(ownerData));
@@ -79,9 +89,9 @@ export const AuthProvider = ({ children }) => {
     } catch (e) {
       console.error('[AuthContext] Failed to save login info', e);
     }
-  };
+  }, []);
 
-  const registerShop = async (registrationData) => {
+  const registerShop = useCallback(async (registrationData) => {
     try {
       const res = await ownerAuthService.registerOwner(registrationData);
       
@@ -98,9 +108,9 @@ export const AuthProvider = ({ children }) => {
       console.error('[AuthContext] Failed to register shop', e);
       throw e;
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await AsyncStorage.removeItem('owner_token');
       await AsyncStorage.removeItem('owner_profile');
@@ -112,16 +122,16 @@ export const AuthProvider = ({ children }) => {
     } catch (e) {
       console.error('[AuthContext] Failed to clear login info', e);
     }
-  };
+  }, []);
 
-  const updateShopState = async (updatedShop) => {
+  const updateShopState = useCallback(async (updatedShop) => {
     try {
       await AsyncStorage.setItem('owner_shop', JSON.stringify(updatedShop));
       setShop(updatedShop);
     } catch (e) {
       console.error('[AuthContext] Failed to update local shop state', e);
     }
-  };
+  }, []);
 
   return (
     <AuthContext.Provider

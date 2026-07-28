@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Switch, ActivityIndicator, SafeAreaView, Platform } from 'react-native';
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Switch, ActivityIndicator, SafeAreaView, Platform, Animated, Dimensions } from 'react-native';
 import { Store, MapPin, Navigation, Star, ShieldAlert, BadgeCheck } from 'lucide-react-native';
 import { getMockShop, updateMockShopStatus, updateMockShopGeofence } from '../mockOwnerData';
 import { AuthContext } from '../context/AuthContext';
@@ -13,13 +13,17 @@ export const ShopScreen = () => {
   // Fallback states if context is empty
   const [localShop, setLocalShop] = useState(null);
 
+  const isTogglingRef = useRef(false);
+
   const fetchShopDetails = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getMockShop();
-      setLocalShop(data);
-      if (updateShopState) {
-        updateShopState(data);
+      if (!isTogglingRef.current) {
+        setLocalShop(data);
+        if (updateShopState && data.status !== shop?.status) {
+          updateShopState(data);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -31,45 +35,56 @@ export const ShopScreen = () => {
     } finally {
       setLoading(false);
     }
-  }, [updateShopState]);
+  }, [updateShopState, shop]);
 
   useEffect(() => {
     if (!shop) {
       fetchShopDetails();
-    } else {
+    } else if (!isTogglingRef.current) {
       setLocalShop(shop);
     }
   }, [shop, fetchShopDetails]);
 
-  const handleToggleActive = async () => {
-    if (!localShop) return;
+  const handleToggleActive = (targetOnline) => {
+    if (!localShop || isTogglingRef.current) return;
+    const currentOnline = localShop.status === 'active';
+    const nextOnline = targetOnline !== undefined ? targetOnline : !currentOnline;
+    if (nextOnline === currentOnline) return;
     
-    const newStatus = localShop.status === 'active' ? 'inactive' : 'active';
+    isTogglingRef.current = true;
+    const newStatus = nextOnline ? 'active' : 'inactive';
     
-    // Optimistic local update
+    // Instantly apply state change so GPU animation starts without delay
     const updated = { ...localShop, status: newStatus };
     setLocalShop(updated);
     
-    try {
-      const res = await updateMockShopStatus(newStatus);
-      if (updateShopState) {
-        updateShopState(res);
+    // Defer heavy storage operations so UI thread doesn't hang or stutter during transition
+    setTimeout(async () => {
+      try {
+        const res = await updateMockShopStatus(newStatus);
+        if (updateShopState) {
+          updateShopState(res);
+        }
+        Toast.show({
+          type: 'success',
+          text1: 'Shop Status Updated',
+          text2: `Your shop is now ${newStatus === 'active' ? 'Online' : 'Offline'}.`
+        });
+      } catch (e) {
+        console.error(e);
+        // Revert local state
+        setLocalShop({ ...localShop, status: currentOnline ? 'active' : 'inactive' });
+        Toast.show({
+          type: 'error',
+          text1: 'Error',
+          text2: 'Failed to update shop status.'
+        });
+      } finally {
+        setTimeout(() => {
+          isTogglingRef.current = false;
+        }, 200);
       }
-      Toast.show({
-        type: 'success',
-        text1: 'Shop Status Updated',
-        text2: `Your shop is now ${newStatus === 'active' ? 'Online' : 'Offline'}.`
-      });
-    } catch (e) {
-      console.error(e);
-      // Revert local state
-      setLocalShop({ ...localShop, status: localShop.status });
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: 'Failed to update shop status.'
-      });
-    }
+    }, 80);
   };
 
   const handleGenerateGeofence = async () => {
@@ -157,6 +172,27 @@ export const ShopScreen = () => {
   const isOnline = localShop.status === 'active';
   const hasGeofence = Array.isArray(localShop.delivery_polygon) && localShop.delivery_polygon.length > 0;
 
+  const slideAnim = useRef(new Animated.Value(localShop.status === 'active' ? 0 : 1)).current;
+  const [toggleBoxWidth, setToggleBoxWidth] = useState(Dimensions.get('window').width - 64);
+
+  useEffect(() => {
+    Animated.timing(slideAnim, {
+      toValue: isOnline ? 0 : 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [isOnline, slideAnim]);
+
+  const capsuleWidth = Math.max(20, (toggleBoxWidth - 12) / 2);
+  const translateX = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, capsuleWidth],
+  });
+  const greenOpacity = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Title Header */}
@@ -187,27 +223,66 @@ export const ShopScreen = () => {
 
         {/* Status Toggle Card */}
         <View style={styles.card}>
-          <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>Storefront Status</Text>
-              <Text style={styles.cardDescription}>
-                {isOnline 
-                  ? 'Your store is ONLINE and visible to neighbors.' 
-                  : 'Your store is OFFLINE. Customers cannot place orders.'}
+          <View style={{ marginBottom: 16 }}>
+            <Text style={styles.cardTitle}>Storefront Status</Text>
+            <Text style={styles.cardDescription}>
+              {isOnline 
+                ? 'Your store is ONLINE and visible to neighbors.' 
+                : 'Your store is OFFLINE. Customers cannot place orders.'}
+            </Text>
+          </View>
+
+          {/* Huge Animated Pill Switcher (Hardware Accelerated) */}
+          <View
+            style={[styles.animatedToggleContainer, { backgroundColor: '#475569', overflow: 'hidden' }]}
+            onLayout={(e) => setToggleBoxWidth(e.nativeEvent.layout.width)}
+          >
+            {/* Green Background Overlay with GPU Opacity Animation */}
+            <Animated.View
+              style={[
+                StyleSheet.absoluteFillObject,
+                { backgroundColor: '#16A34A', opacity: greenOpacity }
+              ]}
+            />
+
+            <Animated.View
+              style={[
+                styles.animatedToggleCapsule,
+                { width: capsuleWidth, transform: [{ translateX }] }
+              ]}
+            />
+
+            {/* Online Option */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={styles.animatedToggleTab}
+              onPress={() => {
+                handleToggleActive(true);
+              }}
+            >
+              <Text style={[
+                styles.animatedToggleText,
+                { color: isOnline ? '#15803D' : '#FFFFFF' }
+              ]}>
+                Online
               </Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={[styles.statusToggleLabel, { color: isOnline ? '#2E7D32' : '#C62828' }]}>
-                {isOnline ? 'ONLINE' : 'OFFLINE'}
+            </TouchableOpacity>
+
+            {/* Offline Option */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={styles.animatedToggleTab}
+              onPress={() => {
+                handleToggleActive(false);
+              }}
+            >
+              <Text style={[
+                styles.animatedToggleText,
+                { color: !isOnline ? '#334155' : '#FFFFFF' }
+              ]}>
+                Offline
               </Text>
-              <Switch
-                value={isOnline}
-                onValueChange={handleToggleActive}
-                trackColor={{ false: '#CFD8DC', true: '#A8D5BA' }}
-                thumbColor={isOnline ? '#2E7D32' : '#78909C'}
-                style={{ transform: [{ scaleX: 1.3 }, { scaleY: 1.3 }], marginTop: 6 }}
-              />
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -393,6 +468,44 @@ const styles = StyleSheet.create({
   statusToggleLabel: {
     fontSize: 12,
     fontWeight: '800',
+  },
+  animatedToggleContainer: {
+    height: 64,
+    borderRadius: 32,
+    flexDirection: 'row',
+    padding: 6,
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  animatedToggleCapsule: {
+    position: 'absolute',
+    left: 6,
+    top: 6,
+    bottom: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 26,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  animatedToggleTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  animatedToggleText: {
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   sectionHeader: {
     ...theme.typography.subtitle,

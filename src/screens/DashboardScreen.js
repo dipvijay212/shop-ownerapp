@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react';
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Share,
   FlatList,
   SafeAreaView,
+  Animated,
 } from 'react-native';
 import {
   Bell,
@@ -49,8 +50,11 @@ import {
   updateMockOrderStatus,
   getMockShop,
   updateMockShopStatus,
+  getMockNotifications,
+  markMockNotificationRead,
 } from '../mockOwnerData';
 import Toast from 'react-native-toast-message';
+import { CollapsibleOrderItems } from '../components/CollapsibleOrderItems';
 
 const { width } = Dimensions.get('window');
 
@@ -61,11 +65,36 @@ export const DashboardScreen = () => {
 
   const [loading, setLoading] = useState(false);
   const [shopOnline, setShopOnline] = useState(shop?.status === 'active');
+  const slideAnim = useRef(new Animated.Value(shop?.status === 'active' ? 0 : 1)).current;
+  const [toggleBoxWidth, setToggleBoxWidth] = useState(width - 64);
+  const isTogglingRef = useRef(false);
+
+  useEffect(() => {
+    Animated.timing(slideAnim, {
+      toValue: shopOnline ? 0 : 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [shopOnline, slideAnim]);
+
+  const capsuleWidth = Math.max(20, (toggleBoxWidth - 12) / 2);
+  const translateX = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, capsuleWidth],
+  });
+  const greenOpacity = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
   const [orders, setOrders] = useState([]);
   const [showQrModal, setShowQrModal] = useState(false);
   const [showLedgerModal, setShowLedgerModal] = useState(false);
   const [showCouponModal, setShowCouponModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [notificationCategory, setNotificationCategory] = useState('all');
   
   // Quick Metric states
   const [metrics, setMetrics] = useState({
@@ -83,14 +112,20 @@ export const DashboardScreen = () => {
     try {
       // Load Shop
       const shopData = await getMockShop();
-      setShopOnline(shopData.status === 'active');
-      if (updateShopState) {
-        updateShopState(shopData);
+      if (!isTogglingRef.current) {
+        setShopOnline(shopData.status === 'active');
+        if (updateShopState && shopData.status !== shop?.status) {
+          updateShopState(shopData);
+        }
       }
 
       // Load Orders for Metrics & Recent List
       const ordersData = await getMockOrders('all');
       setOrders(ordersData);
+
+      // Load Notifications & AI Advisory Alerts
+      const notifs = await getMockNotifications();
+      setNotifications(notifs);
 
       // Compute Metrics
       let rev = 0;
@@ -141,29 +176,42 @@ export const DashboardScreen = () => {
     }, [loadDashboardData])
   );
 
-  const handleToggleShopStatus = async () => {
-    const newStatus = shopOnline ? 'inactive' : 'active';
-    // Optimistic toggle
-    setShopOnline(newStatus === 'active');
-    try {
-      const updatedShop = await updateMockShopStatus(newStatus);
-      if (updateShopState) {
-        updateShopState(updatedShop);
+  const handleToggleShopStatus = (targetOnline) => {
+    if (isTogglingRef.current) return;
+    const nextState = targetOnline !== undefined ? targetOnline : !shopOnline;
+    if (nextState === shopOnline) return;
+
+    isTogglingRef.current = true;
+    const newStatus = nextState ? 'active' : 'inactive';
+    // Instantly update UI state so GPU animation triggers with zero lag
+    setShopOnline(nextState);
+
+    // Defer heavy storage operations so UI thread doesn't hang during animation
+    setTimeout(async () => {
+      try {
+        const updatedShop = await updateMockShopStatus(newStatus);
+        if (updateShopState) {
+          updateShopState(updatedShop);
+        }
+        Toast.show({
+          type: 'success',
+          text1: 'Shop Status Updated',
+          text2: `Your shop is now ${nextState ? 'Open (Online)' : 'Closed (Offline)'}.`,
+        });
+      } catch (e) {
+        setShopOnline(!nextState);
+        console.error(e);
+        Toast.show({
+          type: 'error',
+          text1: 'Error',
+          text2: 'Could not change status.',
+        });
+      } finally {
+        setTimeout(() => {
+          isTogglingRef.current = false;
+        }, 200);
       }
-      Toast.show({
-        type: 'success',
-        text1: 'Shop Status Updated',
-        text2: `Your shop is now ${newStatus === 'active' ? 'Open (Online)' : 'Closed (Offline)'}.`,
-      });
-    } catch (e) {
-      setShopOnline(!shopOnline);
-      console.error(e);
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: 'Could not change status.',
-      });
-    }
+    }, 80);
   };
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
@@ -204,13 +252,10 @@ export const DashboardScreen = () => {
   const quickActions = [
     { id: 'orders', title: 'Manage Orders', icon: ClipboardList, color: '#16A34A', bg: '#DCFCE7', onPress: () => navigation.navigate('Orders') },
     { id: 'add_product', title: 'Add Product', icon: Plus, color: '#15803D', bg: '#DCFCE7', onPress: () => navigation.navigate('Products') },
-    { id: 'categories', title: 'Categories', icon: Grid, color: '#2563EB', bg: '#DBEAFE', onPress: () => setShowCategoryModal(true) },
-    { id: 'customers', title: 'Customers', icon: Users, color: '#9333EA', bg: '#F3E8FF', onPress: () => navigation.navigate('Customers') },
     { id: 'qr', title: 'QR Code', icon: QrCode, color: '#0F172A', bg: '#F1F5F9', onPress: () => setShowQrModal(true) },
-    { id: 'analytics', title: 'Analytics', icon: BarChart2, color: '#EA580C', bg: '#FFEDD5', onPress: () => navigation.navigate('Profile') },
-    { id: 'ledger', title: 'Credit Ledger', icon: BookOpen, color: '#D97706', bg: '#FEF3C7', onPress: () => setShowLedgerModal(true) },
-    { id: 'coupons', title: 'Coupons', icon: Percent, color: '#E11D48', bg: '#FFE4E6', onPress: () => setShowCouponModal(true) },
+    { id: 'ledger', title: 'Khata', icon: BookOpen, color: '#D97706', bg: '#FEF3C7', onPress: () => setShowLedgerModal(true) },
     { id: 'delivery', title: 'Delivery Area', icon: Map, color: '#0D9488', bg: '#CCFBF1', onPress: () => navigation.navigate('DeliveryArea') },
+    { id: 'timing', title: 'Shop timing', icon: Clock, color: '#EA580C', bg: '#FFEDD5', onPress: () => navigation.navigate('Profile', { initialMode: 'hours' }) },
   ];
 
   return (
@@ -226,28 +271,88 @@ export const DashboardScreen = () => {
           </View>
         </View>
         <View style={styles.headerControls}>
-          <TouchableOpacity style={styles.bellBtn} onPress={() => Toast.show({ type: 'info', text1: 'Notifications', text2: 'No new alert' })}>
+          <TouchableOpacity style={styles.bellBtn} onPress={() => setShowNotificationsModal(true)}>
             <Bell color={theme.colors.textDark} size={22} />
+            {notifications.length > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>{notifications.length}</Text>
+              </View>
+            )}
           </TouchableOpacity>
-          <View style={styles.statusToggleContainer}>
-            <Text style={[styles.statusText, { color: shopOnline ? theme.colors.success : theme.colors.textLight }]}>
-              {shopOnline ? 'Online' : 'Offline'}
-            </Text>
-            <Switch
-              value={shopOnline}
-              onValueChange={handleToggleShopStatus}
-              trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }}
-              thumbColor={shopOnline ? theme.colors.primary : '#F1F5F9'}
-            />
-          </View>
         </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Real-time sync message */}
-        <View style={styles.syncCard}>
-          <Clock size={16} color={theme.colors.primary} style={{ marginRight: 6 }} />
-          <Text style={styles.syncText}>Last updated: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+        {/* Prominent Store Status Banner & Custom Animated Toggle */}
+        <View style={styles.statusBannerCard}>
+          <View style={styles.statusBannerTopRow}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <View style={[styles.statusIndicatorDot, { backgroundColor: shopOnline ? '#22C55E' : '#94A3B8' }]} />
+                <Text style={styles.statusBannerTitle}>Store Status</Text>
+              </View>
+              <Text style={styles.statusBannerSubtitle}>
+                {shopOnline ? 'Store is LIVE & accepting orders from customers.' : 'Store is OFFLINE. New orders are paused.'}
+              </Text>
+            </View>
+            <View style={styles.syncBadge}>
+              <Clock size={12} color={theme.colors.textLight} style={{ marginRight: 4 }} />
+              <Text style={styles.syncBadgeText}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+            </View>
+          </View>
+
+          {/* Huge Animated Pill Switcher (Hardware Accelerated) */}
+          <View
+            style={[styles.animatedToggleContainer, { backgroundColor: '#475569', overflow: 'hidden' }]}
+            onLayout={(e) => setToggleBoxWidth(e.nativeEvent.layout.width)}
+          >
+            {/* Green Background Overlay with GPU Opacity Animation */}
+            <Animated.View
+              style={[
+                StyleSheet.absoluteFillObject,
+                { backgroundColor: '#16A34A', opacity: greenOpacity }
+              ]}
+            />
+
+            <Animated.View
+              style={[
+                styles.animatedToggleCapsule,
+                { width: capsuleWidth, transform: [{ translateX }] }
+              ]}
+            />
+
+            {/* Online Option */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={styles.animatedToggleTab}
+              onPress={() => {
+                handleToggleShopStatus(true);
+              }}
+            >
+              <Text style={[
+                styles.animatedToggleText,
+                { color: shopOnline ? '#15803D' : '#FFFFFF' }
+              ]}>
+                Online
+              </Text>
+            </TouchableOpacity>
+
+            {/* Offline Option */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={styles.animatedToggleTab}
+              onPress={() => {
+                handleToggleShopStatus(false);
+              }}
+            >
+              <Text style={[
+                styles.animatedToggleText,
+                { color: !shopOnline ? '#334155' : '#FFFFFF' }
+              ]}>
+                Offline
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Analytics Section */}
@@ -277,7 +382,7 @@ export const DashboardScreen = () => {
           <View style={styles.metricCard}>
             <Truck color="#8B5CF6" size={24} />
             <Text style={styles.metricValue}>{metrics.preparing}</Text>
-            <Text style={styles.metricLabel}>In Kitchen / Pack</Text>
+            <Text style={styles.metricLabel}>Processing / Packing</Text>
             <Text style={styles.metricSubText}>Preparing orders</Text>
           </View>
 
@@ -364,9 +469,7 @@ export const DashboardScreen = () => {
 
               <View style={styles.orderDetailsDivider} />
               
-              <Text style={styles.itemsSummary}>
-                {order.items?.map(it => `${it.name} (${it.quantity}x)`).join(', ')}
-              </Text>
+              <CollapsibleOrderItems items={order.items} />
 
               <View style={styles.orderCardFooter}>
                 <View>
@@ -456,16 +559,18 @@ export const DashboardScreen = () => {
                 </View>
               </View>
 
-              <Text style={styles.ledgerHeader}>Recent Ledger Bookings</Text>
+              <Text style={styles.ledgerHeader}>Recent Khata Repayments & Dues</Text>
               {[
-                { name: 'Karan Johar', amt: '₹4,500', type: 'due', date: 'Today, 11:20 AM' },
-                { name: 'Sunita Rao', amt: '₹1,200', type: 'due', date: 'Yesterday' },
-                { name: 'Amit Kumar', amt: '₹2,000', type: 'paid', date: '22 July 2026' },
-                { name: 'Rajesh Patel', amt: '₹1,890', type: 'due', date: '19 July 2026' },
+                { name: 'Priya Patel', amt: '₹500', type: 'partial', desc: 'Partial Repayment (UPI)', bal: '₹700 due', date: 'Today, 03:45 PM' },
+                { name: 'Rohan Mehta', amt: '₹4,500', type: 'due', desc: 'Bulk goods given on Udhari', bal: '₹4,500 due', date: 'Today, 11:20 AM' },
+                { name: 'Sunita Rao', amt: '₹1,200', type: 'due', desc: 'Monthly groceries credit', bal: '₹1,200 due', date: 'Yesterday' },
+                { name: 'Amit Kumar', amt: '₹2,000', type: 'paid', desc: 'Full Ledger Clear (GPay)', bal: '₹0 due', date: '22 July 2026' },
+                { name: 'Rajesh Patel', amt: '₹600', type: 'partial', desc: 'Partial Repayment (Cash)', bal: '₹1,290 due', date: '19 July 2026' },
               ].map((item, idx) => (
                 <View key={idx} style={styles.ledgerRow}>
-                  <View>
+                  <View style={{ flex: 1, marginRight: 10 }}>
                     <Text style={styles.ledgerCustomerName}>{item.name}</Text>
+                    <Text style={[styles.ledgerDate, { color: '#475569', fontWeight: '700' }]}>{item.desc}</Text>
                     <Text style={styles.ledgerDate}>{item.date}</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
@@ -475,7 +580,9 @@ export const DashboardScreen = () => {
                     ]}>
                       {item.type === 'due' ? '+' : '-'}{item.amt}
                     </Text>
-                    <Text style={styles.ledgerRowStatus}>{item.type === 'due' ? 'Outstanding' : 'Repaid'}</Text>
+                    <Text style={[styles.ledgerRowStatus, item.type === 'partial' && { color: '#D97706', fontWeight: '800' }]}>
+                      {item.type === 'due' ? 'Outstanding' : item.type === 'partial' ? `Partial (${item.bal})` : 'Fully Paid'}
+                    </Text>
                   </View>
                 </View>
               ))}
@@ -557,6 +664,96 @@ export const DashboardScreen = () => {
           </View>
         </View>
       </Modal>
+
+      {/* NOTIFICATION CENTER & AI INSIGHTS MODAL */}
+      <Modal visible={showNotificationsModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '88%', height: '88%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Bell color={theme.colors.textDark} size={22} style={{ marginRight: 8 }} />
+                <Text style={styles.modalTitle}>Merchant Alert Center</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowNotificationsModal(false)}>
+                <X color={theme.colors.textDark} size={24} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Category Filter Tabs */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.notifFilterScroll} contentContainerStyle={styles.notifFilterContainer}>
+              {[
+                { key: 'all', label: `All (${notifications.length})` },
+                { key: 'orders', label: 'Orders' },
+                { key: 'subscription', label: 'Subscription' },
+                { key: 'ai_insights', label: '🤖 AI Insights' },
+                { key: 'shop_profile', label: 'Shop & Profile' },
+              ].map(tab => (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[styles.notifFilterPill, notificationCategory === tab.key && styles.notifFilterPillActive]}
+                  onPress={() => setNotificationCategory(tab.key)}
+                >
+                  <Text style={[styles.notifFilterText, notificationCategory === tab.key && styles.notifFilterTextActive]}>
+                    {tab.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1, marginTop: 6 }}>
+              {notifications
+                .filter(n => {
+                  if (notificationCategory === 'all') return true;
+                  if (notificationCategory === 'shop_profile') return n.category === 'shop' || n.category === 'profile';
+                  return n.category === notificationCategory;
+                })
+                .map(notif => (
+                  <View key={notif.id} style={[styles.notifCard, !notif.is_read && styles.notifCardUnread]}>
+                    <View style={styles.notifHeaderRow}>
+                      <Text style={[styles.notifTitle, { color: notif.color || theme.colors.textDark }]}>
+                        {notif.title}
+                      </Text>
+                      <Text style={styles.notifTime}>
+                        {notif.created_at ? new Date(notif.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Today'}
+                      </Text>
+                    </View>
+                    <Text style={styles.notifBody}>{notif.body}</Text>
+                    
+                    {notif.actionLabel && (
+                      <TouchableOpacity
+                        style={[styles.notifActionBtn, { backgroundColor: notif.bgColor || '#F1F5F9', borderColor: notif.color || '#CBD5E1' }]}
+                        onPress={() => {
+                          setShowNotificationsModal(false);
+                          if (notif.actionRoute === 'Orders') {
+                            navigation.navigate('Orders');
+                          } else if (notif.actionRoute === 'Shop' || notif.category === 'profile') {
+                            navigation.navigate('Shop');
+                          } else if (notif.actionRoute === 'Customers') {
+                            navigation.navigate('Customers');
+                          } else if (notif.actionRoute === 'Products') {
+                            navigation.navigate('Products');
+                          } else if (notif.category === 'subscription') {
+                            navigation.navigate('More', { screen: 'Profile' });
+                          } else {
+                            Toast.show({
+                              type: 'success',
+                              text1: 'Action Launched',
+                              text2: `${notif.actionLabel} applied.`,
+                            });
+                          }
+                        }}
+                      >
+                        <Text style={[styles.notifActionText, { color: notif.color || theme.colors.textDark }]}>
+                          {notif.actionLabel} →
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -633,6 +830,93 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: theme.spacing.m,
     paddingBottom: 40,
+  },
+  statusBannerCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  statusBannerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  statusIndicatorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  statusBannerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  statusBannerSubtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+    lineHeight: 18,
+  },
+  syncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+  },
+  syncBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  animatedToggleContainer: {
+    height: 64,
+    borderRadius: 32,
+    flexDirection: 'row',
+    padding: 6,
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  animatedToggleCapsule: {
+    position: 'absolute',
+    left: 6,
+    top: 6,
+    bottom: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 26,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  animatedToggleTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  animatedToggleText: {
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   syncCard: {
     flexDirection: 'row',
@@ -1134,5 +1418,102 @@ const styles = StyleSheet.create({
     color: theme.colors.textDark,
     fontSize: 12,
     fontWeight: '800',
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#DC2626',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFF',
+    paddingHorizontal: 3,
+  },
+  bellBadgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  notifFilterScroll: {
+    maxHeight: 46,
+    marginBottom: 8,
+  },
+  notifFilterContainer: {
+    paddingVertical: 4,
+  },
+  notifFilterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  notifFilterPillActive: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  notifFilterText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  notifFilterTextActive: {
+    color: '#FFF',
+    fontWeight: '850',
+  },
+  notifCard: {
+    backgroundColor: '#FFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    ...theme.shadows.small,
+  },
+  notifCardUnread: {
+    backgroundColor: '#FAFAFC',
+    borderColor: '#CBD5E1',
+  },
+  notifHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+  },
+  notifTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '850',
+    marginRight: 8,
+    lineHeight: 20,
+  },
+  notifTime: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  notifBody: {
+    fontSize: 13,
+    color: '#334155',
+    fontWeight: '600',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  notifActionBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  notifActionText: {
+    fontSize: 12,
+    fontWeight: '850',
   },
 });

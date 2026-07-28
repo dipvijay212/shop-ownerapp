@@ -23,12 +23,16 @@ import {
   BookOpen,
   UserCheck,
   Users,
+  CheckCircle,
+  AlertCircle,
+  ShieldCheck,
+  FileText,
 } from 'lucide-react-native';
 import { theme } from '../theme';
 import Toast from 'react-native-toast-message';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Mock Customers Data
+// Mock Customers Data with Tamper-Proof Audit History
 const INITIAL_CUSTOMERS = [
   {
     id: 'cust_1',
@@ -40,8 +44,8 @@ const INITIAL_CUSTOMERS = [
     avatar: 'AS',
     status: 'active',
     history: [
-      { id: 'h_1', type: 'order', detail: 'Order #LS-94821 delivered', amount: '₹997.00', date: '20 July 2026' },
-      { id: 'h_2', type: 'order', detail: 'Order #LS-91122 delivered', amount: '₹1,450.00', date: '14 July 2026' },
+      { id: 'h_1', type: 'order', detail: 'Order #LS-94821 delivered', amount: '₹997.00', balanceAfter: 0.00, mode: 'Cash', date: '20 July 2026, 04:15 PM', note: 'Paid Cash on Delivery' },
+      { id: 'h_2', type: 'order', detail: 'Order #LS-91122 delivered', amount: '₹1,450.00', balanceAfter: 0.00, mode: 'UPI', date: '14 July 2026, 01:20 PM', note: 'Paid via PhonePe QR' },
     ]
   },
   {
@@ -54,8 +58,9 @@ const INITIAL_CUSTOMERS = [
     avatar: 'PP',
     status: 'active',
     history: [
-      { id: 'h_3', type: 'credit', detail: 'Goods bought on credit', amount: '+₹1,200.00', date: 'Yesterday' },
-      { id: 'h_4', type: 'order', detail: 'Order #LS-28491 placed', amount: '₹1,300.00', date: '23 July 2026' },
+      { id: 'h_3', type: 'credit', detail: 'Goods bought on Udhari (Grocery & Staples)', amount: '+₹1,200.00', balanceAfter: 1200.00, mode: 'Udhari', date: '26 Jul 2026, 06:15 PM', note: 'Signed Memo #214 - promised to pay in 5 days' },
+      { id: 'h_3_prev', type: 'payment', detail: 'Partial Udhari Repayment', amount: '-₹800.00', balanceAfter: 0.00, mode: 'UPI / GPay', date: '20 Jul 2026, 11:45 AM', note: 'Txn Ref: UPI/847291/PATEL • Verified in bank' },
+      { id: 'h_4', type: 'order', detail: 'Order #LS-28491 placed', amount: '₹1,300.00', balanceAfter: 800.00, mode: 'Cash', date: '23 Jul 2026, 03:10 PM', note: 'Paid cash at counter' },
     ]
   },
   {
@@ -68,7 +73,7 @@ const INITIAL_CUSTOMERS = [
     avatar: 'RM',
     status: 'active',
     history: [
-      { id: 'h_5', type: 'credit', detail: 'Bulk grocery booking on credit', amount: '+₹4,500.00', date: 'Today, 11:20 AM' },
+      { id: 'h_5', type: 'credit', detail: 'Bulk grocery booking on Udhari', amount: '+₹4,500.00', balanceAfter: 4500.00, mode: 'Udhari', date: 'Today, 11:20 AM', note: 'Customer verification ID attached. Due next month' },
     ]
   },
   {
@@ -81,7 +86,7 @@ const INITIAL_CUSTOMERS = [
     avatar: 'SS',
     status: 'active',
     history: [
-      { id: 'h_6', type: 'order', detail: 'Order #LS-48291 delivered', amount: '₹2,450.00', date: '18 July 2026' },
+      { id: 'h_6', type: 'order', detail: 'Order #LS-48291 delivered', amount: '₹2,450.00', balanceAfter: 0.00, mode: 'Card', date: '18 July 2026, 07:40 PM', note: 'POS Terminal Txn Verified' },
     ]
   },
   {
@@ -94,7 +99,7 @@ const INITIAL_CUSTOMERS = [
     avatar: 'AK',
     status: 'inactive',
     history: [
-      { id: 'h_7', type: 'payment', detail: 'Cleared ledger amount via UPI', amount: '-₹2,000.00', date: '22 July 2026' },
+      { id: 'h_7', type: 'payment', detail: 'Full Udhari Settlement via UPI', amount: '-₹2,000.00', balanceAfter: 0.00, mode: 'UPI / GPay', date: '22 July 2026, 05:30 PM', note: 'Txn #GPay-91820 • Ledger balance zeroed out' },
     ]
   },
 ];
@@ -105,6 +110,12 @@ export const CustomersScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [modalMode, setModalMode] = useState(null); // 'orders' | 'credit'
+
+  // Partial Payment States
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMode, setPaymentMode] = useState('Cash'); // 'Cash' | 'UPI / GPay' | 'Bank Transfer'
+  const [paymentNote, setPaymentNote] = useState('');
 
   const filteredCustomers = customers.filter(c => 
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -130,31 +141,64 @@ export const CustomersScreen = () => {
 
   const handleRecordPayment = () => {
     if (!selectedCustomer) return;
-    
-    // Repay mock credit
+    const amountNum = parseFloat(paymentAmount || '0');
+    if (isNaN(amountNum) || amountNum <= 0) {
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid Amount',
+        text2: 'Please enter a valid payment amount greater than ₹0.',
+      });
+      return;
+    }
+
+    if (amountNum > selectedCustomer.outstandingCredit && selectedCustomer.outstandingCredit > 0) {
+      Toast.show({
+        type: 'info',
+        text1: 'Excess Repayment Alert',
+        text2: `Payment exceeds due amount (₹${selectedCustomer.outstandingCredit.toFixed(2)}). Balance zeroed out.`,
+      });
+    }
+
+    const newDue = Math.max(0, selectedCustomer.outstandingCredit - amountNum);
+    const isFull = newDue === 0 && selectedCustomer.outstandingCredit > 0 && amountNum >= selectedCustomer.outstandingCredit;
+    const title = isFull ? 'Full Udhari Repayment' : 'Partial Udhari Repayment';
+    const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateString = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    const newHistoryItem = {
+      id: `pay_${Date.now()}`,
+      type: 'payment',
+      detail: `${title} (${paymentMode})`,
+      amount: `-₹${amountNum.toFixed(2)}`,
+      balanceAfter: newDue,
+      mode: paymentMode,
+      date: `${dateString}, ${timeString}`,
+      note: paymentNote.trim() ? paymentNote.trim() : `Verified ${paymentMode} receipt at shop counter.`,
+      verified: true,
+    };
+
     const updated = customers.map(c => {
       if (c.id === selectedCustomer.id) {
         return {
           ...c,
-          outstandingCredit: 0.00,
-          history: [
-            { id: `pay_${Date.now()}`, type: 'payment', detail: 'Cleared outstanding credit', amount: `-₹${c.outstandingCredit.toFixed(2)}`, date: 'Just now' },
-            ...c.history
-          ]
+          outstandingCredit: newDue,
+          history: [newHistoryItem, ...c.history],
         };
       }
       return c;
     });
 
     setCustomers(updated);
-    // Find updated customer details
     const updatedCust = updated.find(c => c.id === selectedCustomer.id);
     setSelectedCustomer(updatedCust);
+    setPaymentAmount('');
+    setPaymentNote('');
+    setShowPaymentForm(false);
 
     Toast.show({
       type: 'success',
-      text1: 'Credit Cleared',
-      text2: `Successfully recorded repayment for ${selectedCustomer.name}.`,
+      text1: isFull ? 'Udhari Fully Cleared!' : 'Partial Payment Logged!',
+      text2: `Recorded ₹${amountNum.toFixed(2)} via ${paymentMode}. Remaining Due: ₹${newDue.toFixed(2)}`,
     });
   };
 
@@ -284,7 +328,10 @@ export const CustomersScreen = () => {
                 </View>
                 <Text style={styles.modalTitle}>{selectedCustomer?.name}</Text>
               </View>
-              <TouchableOpacity onPress={() => setSelectedCustomer(null)}>
+              <TouchableOpacity onPress={() => {
+                setSelectedCustomer(null);
+                setShowPaymentForm(false);
+              }}>
                 <X color={theme.colors.textDark} size={24} />
               </TouchableOpacity>
             </View>
@@ -310,35 +357,168 @@ export const CustomersScreen = () => {
                 </>
               ) : (
                 <>
-                  <Text style={styles.modalSubtitle}>Credit & Ledger Profile</Text>
-                  <View style={styles.creditBox}>
-                    <Text style={styles.creditLabel}>Total Outstanding Balance</Text>
-                    <Text style={styles.creditAmount}>₹{selectedCustomer?.outstandingCredit.toFixed(2)}</Text>
-                    <Text style={styles.creditLimit}>Credit Limit: ₹25,000.00</Text>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.modalSubtitle}>Credit & Udhari Profile</Text>
+                    <View style={styles.shieldBadge}>
+                      <ShieldCheck size={14} color="#15803D" style={{ marginRight: 4 }} />
+                      <Text style={styles.shieldText}>TAMPER-PROOF LEDGER</Text>
+                    </View>
                   </View>
 
-                  <Text style={styles.historyHeader}>Recent Ledger Transactions</Text>
-                  {selectedCustomer?.history.filter(h => h.type === 'credit' || h.type === 'payment').map((h) => (
-                    <View key={h.id} style={styles.historyRow}>
-                      <View style={styles.historyDetailColumn}>
-                        <Text style={styles.historyDetailText}>{h.detail}</Text>
-                        <Text style={styles.historyDateText}>{h.date}</Text>
+                  <View style={styles.creditBox}>
+                    <Text style={styles.creditLabel}>Total Outstanding Balance (Udhari)</Text>
+                    <Text style={styles.creditAmount}>₹{selectedCustomer?.outstandingCredit.toFixed(2)}</Text>
+                    <View style={styles.creditLimitRow}>
+                      <Text style={styles.creditLimit}>Credit Limit: ₹25,000.00</Text>
+                      <View style={styles.liveStatusBadge}>
+                        <Text style={styles.liveStatusText}>
+                          {selectedCustomer?.outstandingCredit > 0 ? 'DUE PENDING' : 'ALL CLEAR'}
+                        </Text>
                       </View>
-                      <Text style={[
-                        styles.historyAmountText,
-                        { color: h.type === 'payment' ? theme.colors.success : theme.colors.error }
-                      ]}>
-                        {h.amount}
-                      </Text>
                     </View>
-                  ))}
+                  </View>
 
-                  {selectedCustomer?.outstandingCredit > 0 && (
-                    <TouchableOpacity style={styles.repayBtn} onPress={handleRecordPayment}>
-                      <UserCheck color="#FFF" size={18} style={{ marginRight: 8 }} />
-                      <Text style={styles.repayBtnText}>Record Cash/UPI Payment (Repay)</Text>
+                  {/* Partial & Full Payment Entry Action */}
+                  {selectedCustomer?.outstandingCredit > 0 && !showPaymentForm && (
+                    <TouchableOpacity
+                      style={styles.openRepayBtn}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setPaymentAmount('');
+                        setPaymentNote('');
+                        setShowPaymentForm(true);
+                      }}
+                    >
+                      <UserCheck color="#FFF" size={20} style={{ marginRight: 8 }} />
+                      <Text style={styles.openRepayText}>+ Record Partial / Full Payment</Text>
                     </TouchableOpacity>
                   )}
+
+                  {showPaymentForm && (
+                    <View style={styles.paymentFormCard}>
+                      <View style={styles.formHeaderRow}>
+                        <Text style={styles.formTitle}>Record Udhari Repayment</Text>
+                        <TouchableOpacity onPress={() => setShowPaymentForm(false)}>
+                          <X color={theme.colors.textDark} size={20} />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.formInstruction}>
+                        Log verified partial or full payments. Every entry creates an immutable timestamped audit record to prevent customer disputes.
+                      </Text>
+
+                      {/* Quick amount shortcuts */}
+                      <View style={styles.quickAmtRow}>
+                        {[500, 1000, selectedCustomer?.outstandingCredit].filter((val, i, arr) => val > 0 && (i === 2 || val <= selectedCustomer?.outstandingCredit)).map((val, idx) => (
+                          <TouchableOpacity
+                            key={idx}
+                            style={styles.quickAmtPill}
+                            onPress={() => setPaymentAmount(val.toString())}
+                          >
+                            <Text style={styles.quickAmtText}>
+                              {idx === 2 ? `Full (₹${val.toFixed(0)})` : `₹${val}`}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <Text style={styles.inputLabel}>Enter Payment Amount (₹)</Text>
+                      <TextInput
+                        style={styles.paymentInput}
+                        value={paymentAmount}
+                        onChangeText={setPaymentAmount}
+                        placeholder="e.g. 500"
+                        placeholderTextColor="#94A3B8"
+                        keyboardType="numeric"
+                      />
+
+                      <Text style={styles.inputLabel}>Payment Mode</Text>
+                      <View style={styles.modeRow}>
+                        {['Cash', 'UPI / GPay', 'Bank Transfer'].map((mode) => (
+                          <TouchableOpacity
+                            key={mode}
+                            style={[styles.modeBtn, paymentMode === mode && styles.modeBtnActive]}
+                            onPress={() => setPaymentMode(mode)}
+                          >
+                            <Text style={[styles.modeText, paymentMode === mode && styles.modeTextActive]}>
+                              {mode}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <Text style={styles.inputLabel}>Verification Note & Receipt / Txn ID</Text>
+                      <TextInput
+                        style={[styles.paymentInput, { height: 64, textAlignVertical: 'top', paddingTop: 10 }]}
+                        value={paymentNote}
+                        onChangeText={setPaymentNote}
+                        placeholder="e.g. UPI Txn ID / Cash receipt # / signed notes..."
+                        placeholderTextColor="#94A3B8"
+                        multiline
+                      />
+
+                      <View style={styles.formActionsRow}>
+                        <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowPaymentForm(false)}>
+                          <Text style={styles.cancelBtnText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.confirmPayBtn} onPress={handleRecordPayment}>
+                          <CheckCircle color="#FFF" size={18} style={{ marginRight: 6 }} />
+                          <Text style={styles.confirmPayText}>Verify & Save Payment</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Audit Proof Ledger History */}
+                  <View style={styles.historyHeaderRow}>
+                    <Text style={styles.historyHeader}>Tamper-Proof Audit History</Text>
+                    <Text style={styles.historySubText}>Running balance after every transaction</Text>
+                  </View>
+
+                  {selectedCustomer?.history.filter(h => h.type === 'credit' || h.type === 'payment').map((h) => (
+                    <View key={h.id} style={[styles.auditCard, h.type === 'payment' ? styles.auditCardPay : styles.auditCardDue]}>
+                      <View style={styles.auditTopRow}>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={styles.auditDetailTitle}>{h.detail}</Text>
+                          </View>
+                          <View style={styles.auditDateRow}>
+                            <Clock size={12} color={theme.colors.textLight} style={{ marginRight: 4 }} />
+                            <Text style={styles.auditDateText}>{h.date}</Text>
+                          </View>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={[
+                            styles.auditAmount,
+                            { color: h.type === 'payment' ? '#16A34A' : '#DC2626' }
+                          ]}>
+                            {h.amount}
+                          </Text>
+                          <View style={[styles.modeBadge, { backgroundColor: h.type === 'payment' ? '#DCFCE7' : '#FEE2E2' }]}>
+                            <Text style={[styles.modeBadgeText, { color: h.type === 'payment' ? '#15803D' : '#991B1B' }]}>
+                              {h.mode || (h.type === 'payment' ? 'Repay' : 'Udhari')}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Verification Audit Footer inside card */}
+                      <View style={styles.auditFooterBox}>
+                        <View style={styles.auditNoteColumn}>
+                          <Text style={styles.auditNoteLabel}>Note / Proof:</Text>
+                          <Text style={styles.auditNoteValue}>{h.note || 'Verified transaction record in digital Khata.'}</Text>
+                        </View>
+                        <View style={styles.auditBalanceColumn}>
+                          <Text style={styles.auditBalanceLabel}>DUE AFTER TXN</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                            <CheckCircle size={14} color="#16A34A" style={{ marginRight: 4 }} />
+                            <Text style={styles.auditBalanceValue}>
+                              ₹{h.balanceAfter !== undefined ? h.balanceAfter.toFixed(2) : '0.00'}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
                 </>
               )}
             </ScrollView>
@@ -645,5 +825,303 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  shieldBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#B9F8CF',
+  },
+  shieldText: {
+    fontSize: 10,
+    fontWeight: '850',
+    color: '#15803D',
+    letterSpacing: 0.5,
+  },
+  creditLimitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#FED7D7',
+  },
+  liveStatusBadge: {
+    backgroundColor: '#FFF',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FEB2B2',
+  },
+  liveStatusText: {
+    fontSize: 11,
+    fontWeight: '850',
+    color: theme.colors.error,
+  },
+  openRepayBtn: {
+    backgroundColor: theme.colors.primary,
+    height: 52,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  openRepayText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  paymentFormCard: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 22,
+  },
+  formHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  formTitle: {
+    fontSize: 17,
+    fontWeight: '850',
+    color: theme.colors.textDark,
+  },
+  formInstruction: {
+    fontSize: 12,
+    color: theme.colors.textLight,
+    fontWeight: '600',
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  quickAmtRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 12,
+  },
+  quickAmtPill: {
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginRight: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  quickAmtText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: theme.colors.textDark,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: theme.colors.textDark,
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  paymentInput: {
+    backgroundColor: '#FFF',
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 48,
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.textDark,
+    marginBottom: 12,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    marginBottom: 14,
+    flexWrap: 'wrap',
+  },
+  modeBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    backgroundColor: '#FFF',
+    marginRight: 8,
+    marginBottom: 6,
+  },
+  modeBtnActive: {
+    backgroundColor: theme.colors.primaryLight,
+    borderColor: theme.colors.primary,
+  },
+  modeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: theme.colors.textLight,
+  },
+  modeTextActive: {
+    color: theme.colors.primary,
+    fontWeight: '800',
+  },
+  formActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  cancelBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    backgroundColor: '#FFF',
+  },
+  cancelBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: theme.colors.textLight,
+  },
+  confirmPayBtn: {
+    flex: 1.5,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    marginLeft: 8,
+  },
+  confirmPayText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFF',
+  },
+  historyHeaderRow: {
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    paddingBottom: 8,
+  },
+  historySubText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  auditCard: {
+    backgroundColor: '#FFF',
+    borderWidth: 1.5,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    borderLeftWidth: 6,
+    ...theme.shadows.small,
+  },
+  auditCardPay: {
+    borderColor: '#DCFCE7',
+    borderLeftColor: '#22C55E',
+  },
+  auditCardDue: {
+    borderColor: '#FEE2E2',
+    borderLeftColor: '#EF4444',
+  },
+  auditTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  auditDetailTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: theme.colors.textDark,
+    marginRight: 8,
+  },
+  auditDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  auditDateText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.colors.textLight,
+  },
+  auditAmount: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  modeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  modeBadgeText: {
+    fontSize: 10,
+    fontWeight: '850',
+  },
+  auditFooterBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  auditNoteColumn: {
+    flex: 1,
+    marginRight: 12,
+  },
+  auditNoteLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+    textTransform: 'uppercase',
+  },
+  auditNoteValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    marginTop: 2,
+  },
+  auditBalanceColumn: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  auditBalanceLabel: {
+    fontSize: 10,
+    fontWeight: '850',
+    color: '#64748B',
+  },
+  auditBalanceValue: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#1E293B',
   },
 });

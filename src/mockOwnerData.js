@@ -197,49 +197,167 @@ export const initialReviews = [
 ];
 
 export const initialNotifications = [
+  // --- USER REQUIRED NOTIFICATIONS ---
   {
-    id: 1,
-    title: 'New Order Received',
-    body: 'Order #LS-28491 from Priya Patel has been placed.',
+    id: 101,
+    category: 'orders',
+    title: '📦 New Customer Order Request!',
+    body: 'Order #LS-92841 from Rahul Verma (₹1,450.00 - 6 items) is waiting for rapid acceptance and item packing.',
+    actionLabel: 'Accept & View Order',
+    actionRoute: 'Orders',
     is_read: false,
-    created_at: '2026-07-23T15:00:00.000Z'
+    color: '#0284C7',
+    bgColor: '#E0F2FE',
+    created_at: '2026-07-27T15:50:00.000Z'
   },
   {
-    id: 2,
-    title: 'Payment Received',
-    body: 'UPI Payment of ₹9.59 received for Order #LS-38291 from Rohan Mehta.',
+    id: 102,
+    category: 'orders',
+    title: '🛑 Customer Order Cancelled',
+    body: 'Order #LS-91024 was cancelled by Amit Kumar before dispatch. Reserved inventory (5kg Atta, Oil & Tea leaves) has been restored to active stock.',
+    actionLabel: 'View Cancelled Order',
+    actionRoute: 'Orders',
     is_read: false,
-    created_at: '2026-07-23T12:16:00.000Z'
+    color: '#DC2626',
+    bgColor: '#FEE2E2',
+    created_at: '2026-07-27T15:35:00.000Z'
   },
   {
-    id: 3,
-    title: 'New Review Received',
-    body: 'Aman Sharma gave you a 5-star rating: "Always fresh produce!..."',
-    is_read: true,
-    created_at: '2026-07-22T15:00:00.000Z'
+    id: 103,
+    category: 'shop',
+    title: '✅ Official Shop Approved!',
+    body: 'Verification Successful! Your store is fully verified and approved by admin. You are now visible to neighborhood shoppers on the local marketplace discovery feed.',
+    actionLabel: 'View Live Storefront',
+    actionRoute: 'Shop',
+    is_read: false,
+    color: '#16A34A',
+    bgColor: '#DCFCE7',
+    created_at: '2026-07-27T14:15:00.000Z'
   },
   {
-    id: 4,
-    title: 'Order Status Updated',
-    body: 'Order #LS-58392 is now Out for Delivery.',
-    is_read: true,
-    created_at: '2026-07-22T18:25:00.000Z'
+    id: 104,
+    category: 'subscription',
+    title: '⏳ Plan Expiring in 4 Days!',
+    body: 'Urgent Reminder: Your zero-commission Partner Pro Plan (Rs. 200/Month) will expire in 4 days on 31 July 2026. Renew immediately to prevent order routing pauses!',
+    actionLabel: 'Renew Pro Plan Now',
+    actionRoute: 'Profile_subscription',
+    is_read: false,
+    color: '#D97706',
+    bgColor: '#FEF3C7',
+    created_at: '2026-07-27T11:00:00.000Z'
   },
   {
-    id: 5,
-    title: 'New Order Received',
-    body: 'Order #LS-78392 from Neha Deshmukh has been placed.',
-    is_read: true,
-    created_at: '2026-07-22T10:15:00.000Z'
+    id: 105,
+    category: 'subscription',
+    title: '🏆 Unlock Pro Partner Status (2 Months Completed!)',
+    body: 'Congratulations! You have successfully operated your shop for 2 consecutive months with 100% complete verified details! Subscribe to our single Rs. 200/Month Partner Pro Plan now to enjoy 0% commission on all orders.',
+    actionLabel: 'Subscribe @ Rs. 200/Month',
+    actionRoute: 'Profile_subscription',
+    is_read: false,
+    color: '#7C3AED',
+    bgColor: '#F3E8FF',
+    created_at: '2026-07-26T10:00:00.000Z'
   },
   {
-    id: 6,
-    title: 'Payment Received',
-    body: 'UPI Payment of ₹11.97 received for Order #LS-78392.',
+    id: 106,
+    category: 'subscription',
+    title: '🚀 Renew / Rebuy Subscription for 3x Order Boost!',
+    body: 'Stores with an active Partner Pro Plan gain top priority positioning in neighborhood shopper searches! Rebuy or renew your subscription today to attract significantly more customer orders.',
+    actionLabel: 'Boost Orders @ Rs. 200/M',
+    actionRoute: 'Profile_subscription',
     is_read: true,
-    created_at: '2026-07-22T10:16:00.000Z'
-  }
+    color: '#D97706',
+    bgColor: '#FEF3C7',
+    created_at: '2026-07-25T16:20:00.000Z'
+  },
+  {
+    id: 107,
+    category: 'profile',
+    title: '⚠️ Complete Your Remaining Shop Profile',
+    body: 'Action Required: Your shop profile is 85% complete. Please finalize your store operating hours, precise delivery area geo-boundary, and bank KYC details to enable seamless UPI automated daily settlements.',
+    actionLabel: 'Complete Shop Details',
+    actionRoute: 'Profile_edit_shop',
+    is_read: true,
+    color: '#EA580C',
+    bgColor: '#FFEDD5',
+    created_at: '2026-07-25T09:00:00.000Z'
+  },
+
+  // --- AI INSIGHTS & CUTTING-EDGE MERGING ADVISORY ---
+  {
+    id: 108,
+    category: 'ai_insights',
+    title: '🤖 AI Demand Forecast: Monsoon Surge Expected',
+    body: 'Weather & local trend analysis predicts heavy rains this weekend in your pincode. AI forecasting models project a 45% spike in order volume for Tea, Snacks, Dairy, and Instant Noodles. Keep extra stock handy!',
+    actionLabel: 'Review Inventory Stock',
+    actionRoute: 'Products',
+    is_read: true,
+    color: '#6366F1',
+    bgColor: '#E0E7FF',
+    created_at: '2026-07-24T18:00:00.000Z'
+  },
+  {
+    id: 109,
+    category: 'ai_insights',
+    title: '🛡️ AI Khata Security & Credit Risk Advisory',
+    body: 'Risk Sentinel Report: Customer Rohan Mehta has accumulated ₹4,500 in pending Udhar (reaching 90% of your store safety threshold). AI recommends collecting at least a partial UPI payment before dispatching new credit orders.',
+    actionLabel: 'Open Customer Khata',
+    actionRoute: 'Customers',
+    is_read: true,
+    color: '#EF4444',
+    bgColor: '#FEE2E2',
+    created_at: '2026-07-24T14:30:00.000Z'
+  },
+  {
+    id: 110,
+    category: 'ai_insights',
+    title: '💡 AI Sales Booster: Convert Abandoned Carts',
+    body: '4 neighborhood shoppers browsed your online catalog today and placed grocery staples in their carts without checking out. Issue a limited 5% discount promo coupon (e.g., WELCOME10) to trigger instant checkout!',
+    actionLabel: 'Create Promo Coupon',
+    actionRoute: 'Dashboard_coupons',
+    is_read: true,
+    color: '#10B981',
+    bgColor: '#D1FAE5',
+    created_at: '2026-07-23T20:10:00.000Z'
+  },
+  {
+    id: 111,
+    category: 'ai_insights',
+    title: '✨ AI Smart Bundling: Breakfast Combo Deal',
+    body: 'Basket item association analysis reveals shoppers buying "Tata Tea Gold 500g" almost always add "Amul Butter" and "Sugar". Create an exclusive Morning Breakfast Combo bundle to increase average basket size by ₹180!',
+    actionLabel: 'Add Combo Product',
+    actionRoute: 'Products',
+    is_read: true,
+    color: '#8B5CF6',
+    bgColor: '#EDE9FE',
+    created_at: '2026-07-23T12:00:00.000Z'
+  },
+  {
+    id: 112,
+    category: 'ai_insights',
+    title: '📈 Zero-Commission Savings & Revenue Tracker',
+    body: 'Monthly Milestone Achieved! You crossed ₹28,400 in merchandise sales this month. Thanks to your active Rs. 200/Month Partner Pro subscription, you saved over ₹4,260 in commissions compared to third-party food & grocery apps.',
+    actionLabel: 'View Sales Reports',
+    actionRoute: 'Dashboard_reports',
+    is_read: true,
+    color: '#059669',
+    bgColor: '#ECFDF5',
+    created_at: '2026-07-22T17:00:00.000Z'
+  },
+  {
+    id: 113,
+    category: 'ai_insights',
+    title: '🔔 Android Audio & Ringtone Readiness Check',
+    body: 'System Check: Ensure battery optimization is disabled for Shop Owner App and notification ringtone volume is set to maximum so you immediately hear loud order arrival chimes even when the phone screen is locked.',
+    actionLabel: 'Test Ringtone Audio',
+    actionRoute: 'Audio_test',
+    is_read: true,
+    color: '#0284C7',
+    bgColor: '#E0F2FE',
+    created_at: '2026-07-21T11:00:00.000Z'
+  },
 ];
+
 
 // ---------------------------------------------------------------------------
 // In-Memory Storage Cache (used as a fallback or for fast read/writes)

@@ -1,82 +1,180 @@
-import React, { useState, useContext } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Dimensions, Image, ScrollView, Platform } from 'react-native';
-import { AuthContext } from '../../context/AuthContext';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  SafeAreaView,
+  ScrollView,
+  Platform,
+  StatusBar,
+  Animated,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Store, ArrowRight, ShieldCheck } from 'lucide-react-native';
-import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Globe, ArrowRight, Check, Sparkles } from 'lucide-react-native';
+import { theme } from '../../theme';
 
-const { width, height } = Dimensions.get('window');
-
-// Languages array removed
+const LANGUAGES = [
+  {
+    id: 'en',
+    name: 'English',
+    nativeName: 'English',
+    symbol: 'A',
+    description: 'Select English as your primary app language',
+    greeting: 'Welcome to Local Shops',
+    subGreeting: 'Select your preferred language to manage your store effortlessly',
+    continueText: 'Continue in English',
+    badge: 'Default',
+  },
+  {
+    id: 'hi',
+    name: 'Hindi',
+    nativeName: 'हिन्दी',
+    symbol: 'अ',
+    description: 'अपनी प्राथमिक ऐप भाषा के रूप में हिंदी चुनें',
+    greeting: 'लोकल शॉप्स में आपका स्वागत है',
+    subGreeting: 'अपनी दुकान का सरलता से प्रबंधन करने के लिए अपनी पसंदीदा भाषा चुनें',
+    continueText: 'आगे बढ़ें (Continue in Hindi)',
+    badge: 'लोकप्रिय',
+  },
+  {
+    id: 'gu',
+    name: 'Gujarati',
+    nativeName: 'ગુજરાતી',
+    symbol: 'અ',
+    description: 'તમારી પ્રાથમિક એપ ભાષા તરીકે ગુજરાતી પસંદ કરો',
+    greeting: 'લોકલ શૉપ્સમાં તમારું સ્વાગત છે',
+    subGreeting: 'તમારી દુકાનનું સરનામું અને વેપાર સંચાલન કરવા માટે તમારી પસંદગીની ભાષા પસંદ કરો',
+    continueText: 'આગળ વધો (Continue in Gujarati)',
+    badge: 'લોકપ્રિય',
+  },
+];
 
 export const LanguageSelectScreen = () => {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  const [selectedLang, setSelectedLang] = useState('en');
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(15)).current;
 
-  const handleGetStarted = (mode) => {
-    if (mode === 'register') {
-      navigation.navigate('ProfileSetup', { isRegistration: true });
-    } else {
-      navigation.navigate('Login');
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 450,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 450,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  const selectedLanguageObj = LANGUAGES.find((l) => l.id === selectedLang) || LANGUAGES[0];
+
+  const handleContinue = async () => {
+    try {
+      await AsyncStorage.setItem('owner_preferred_language', selectedLang);
+    } catch (error) {
+      console.log('Error saving language preference:', error);
     }
+    navigation.navigate('Login');
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.scrollContent}>
-        
-        {/* Full-bleed Hero Illustration */}
-        <View style={styles.heroContainer}>
-          <Image 
-            source={require('../../assets/hero_welcome.jpg')}
-            style={styles.heroImage}
-            resizeMode="cover"
-          />
-          {/* Subtle gradient fade blending into background */}
-          <View style={styles.gradientOverlay}>
-            <Svg height="100%" width="100%">
-              <Defs>
-                <SvgLinearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor="#FAF9F6" stopOpacity="0" />
-                  <Stop offset="1" stopColor="#FAF9F6" stopOpacity="1" />
-                </SvgLinearGradient>
-              </Defs>
-              <Rect x="0" y="0" width="100%" height="100%" fill="url(#fade)" />
-            </Svg>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+
+      <Animated.View
+        style={[
+          styles.contentContainer,
+          { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+        ]}
+      >
+        {/* Dynamic Header Section */}
+        <View style={styles.headerSection}>
+          <View style={styles.iconContainer}>
+            <Globe color={theme.colors.primary} size={30} />
+            <View style={styles.sparkleBadge}>
+              <Sparkles color="#F59E0B" size={14} />
+            </View>
           </View>
+          <Text style={styles.titleText}>{selectedLanguageObj.greeting}</Text>
+          <Text style={styles.subtitleText}>{selectedLanguageObj.subGreeting}</Text>
         </View>
 
-        {/* Content Block */}
-        <View style={styles.content}>
-          {/* Logo Badge */}
-          <View style={styles.logoBadge}>
-            <Store color="#2E7D32" size={24} />
-          </View>
+        {/* Stacked Large Cards for 3 Languages */}
+        <ScrollView
+          style={styles.scrollSection}
+          contentContainerStyle={styles.cardsContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          {LANGUAGES.map((item) => {
+            const isSelected = item.id === selectedLang;
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.card, isSelected && styles.cardSelected]}
+                activeOpacity={0.85}
+                onPress={() => setSelectedLang(item.id)}
+              >
+                {/* Symbol Emblem */}
+                <View style={[styles.symbolBox, isSelected && styles.symbolBoxSelected]}>
+                  <Text style={[styles.symbolText, isSelected && styles.symbolTextSelected]}>
+                    {item.symbol}
+                  </Text>
+                </View>
 
-          {/* Texts */}
-          <Text style={styles.title}>Welcome to Local Shops</Text>
-          <Text style={styles.subtitle}>Your neighborhood, delivered.</Text>
-          
+                {/* Language Texts */}
+                <View style={styles.cardContent}>
+                  <View style={styles.nameRow}>
+                    <Text style={[styles.nativeText, isSelected && styles.nativeTextSelected]}>
+                      {item.nativeName}
+                    </Text>
+                    <Text style={styles.englishText}> ({item.name})</Text>
 
-          {/* Actions */}
-          <TouchableOpacity style={styles.primaryButton} onPress={() => handleGetStarted('register')} activeOpacity={0.8}>
-            <Text style={styles.primaryButtonText}>Create an account</Text>
-            <ArrowRight color="#FFF" size={22} style={{ marginLeft: 8 }} />
+                    {item.badge ? (
+                      <View style={[styles.badge, isSelected && styles.badgeSelected]}>
+                        <Text style={[styles.badgeText, isSelected && styles.badgeTextSelected]}>
+                          {item.badge}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.descriptionText}>{item.description}</Text>
+                </View>
+
+                {/* Radio Button Indicator */}
+                <View style={[styles.radio, isSelected && styles.radioSelected]}>
+                  {isSelected && <Check size={16} color="#FFFFFF" strokeWidth={3} />}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {/* Sticky Bottom Action */}
+        <View style={[styles.footerSection, { paddingBottom: Math.max(insets.bottom + 16, 28) }]}>
+          <TouchableOpacity
+            style={styles.continueButton}
+            activeOpacity={0.85}
+            onPress={handleContinue}
+          >
+            <Text style={styles.continueButtonText}>
+              {selectedLanguageObj.continueText}
+            </Text>
+            <ArrowRight color="#FFFFFF" size={22} style={styles.arrowIcon} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.signInButton} onPress={() => handleGetStarted('login')} activeOpacity={0.6}>
-            <Text style={styles.signInText}>Already have an account? Sign in</Text>
-          </TouchableOpacity>
+          <Text style={styles.footerNote}>
+            You can always change your language later in App Settings
+          </Text>
         </View>
-
-        <View style={styles.spacer} />
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <ShieldCheck color="#999" size={16} style={{ marginRight: 6 }} />
-          <Text style={styles.footerText}>Secure, Local, Community-First</Text>
-        </View>
-        
-      </View>
+      </Animated.View>
     </SafeAreaView>
   );
 };
@@ -84,103 +182,200 @@ export const LanguageSelectScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF9F6', // Warm off-white background
+    backgroundColor: '#F8FAFC',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  scrollContent: {
+  contentContainer: {
     flex: 1,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 0,
   },
-  heroContainer: {
-    width: '100%',
-    height: height * 0.45, // Restored to a larger size since we have more space now
-  },
-  heroImage: {
-    width: '100%',
-    height: '100%',
-  },
-  gradientOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 80, // Reduced height for smoother tight fade
-  },
-  content: {
+  headerSection: {
     paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 20,
     alignItems: 'center',
+    backgroundColor: '#F8FAFC',
   },
-  logoBadge: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#FFF',
+  iconContainer: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#DCFCE7',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -26, // Overlaps the bottom of the hero image
-    marginBottom: 12, // Tightened
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#B9F8D3',
+    ...theme.shadows.soft,
   },
-  title: {
-    fontSize: 24, // Reduced to fit on one line
+  sparkleBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: '#FEF3C7',
+    padding: 3,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  titleText: {
+    fontSize: 26,
     fontWeight: '800',
-    color: '#2E7D32', // Deep forest green
-    marginBottom: 4, // Tightened gap
+    color: '#0F172A',
     textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -0.3,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#777',
-    marginBottom: 40, // Increased gap to balance the removed language selector
-    textAlign: 'center',
-  },
-  // Language styles removed
-  primaryButton: {
-    flexDirection: 'row',
-    backgroundColor: '#2E7D32',
-    width: '100%',
-    height: 56, // Still generous, slightly reduced from 60
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12, // Tightened gap
-    shadowColor: '#2E7D32',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  primaryButtonText: {
-    fontSize: 18,
-    color: '#FFF',
-    fontWeight: 'bold',
-  },
-  signInButton: {
-    paddingVertical: 8, // Tightened gap
-  },
-  signInText: {
+  subtitleText: {
     fontSize: 15,
-    color: '#A8D5BA', // Sage green accent
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 8,
+  },
+  scrollSection: {
+    flex: 1,
+  },
+  cardsContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 24,
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    ...theme.shadows.soft,
+  },
+  cardSelected: {
+    backgroundColor: '#F0FDF4',
+    borderColor: theme.colors.primary,
+    ...theme.shadows.medium,
+  },
+  symbolBox: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  symbolBoxSelected: {
+    backgroundColor: '#DCFCE7',
+    borderColor: '#B9F8D3',
+  },
+  symbolText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#475569',
+  },
+  symbolTextSelected: {
+    color: '#15803D',
+  },
+  cardContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 4,
+  },
+  nativeText: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  nativeTextSelected: {
+    color: '#15803D',
+  },
+  englishText: {
+    fontSize: 15,
     fontWeight: '600',
+    color: '#64748B',
+    marginRight: 6,
   },
-  spacer: {
-    flex: 1, // Will push the footer to the bottom of the space
+  badge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginTop: 2,
   },
-  footer: {
+  badgeSelected: {
+    backgroundColor: '#DCFCE7',
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  badgeTextSelected: {
+    color: '#15803D',
+  },
+  descriptionText: {
+    fontSize: 13,
+    color: '#64748B',
+    lineHeight: 18,
+  },
+  radio: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  radioSelected: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primary,
+  },
+  footerSection: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 20,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    ...theme.shadows.soft,
+  },
+  continueButton: {
+    backgroundColor: theme.colors.primary,
+    height: 58,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'android' ? 32 : 16, // Extra padding for Android nav bar
+    paddingHorizontal: 20,
+    ...theme.shadows.premium,
   },
-  footerText: {
+  continueButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginRight: 8,
+  },
+  arrowIcon: {
+    marginLeft: 4,
+  },
+  footerNote: {
     fontSize: 12,
-    color: '#999',
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginTop: 12,
     fontWeight: '500',
-  }
+  },
 });
 
 export default LanguageSelectScreen;

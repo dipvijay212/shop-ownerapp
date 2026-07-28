@@ -1,19 +1,26 @@
 import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, ActivityIndicator, SafeAreaView, Platform, Dimensions, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, ActivityIndicator, SafeAreaView, Platform, Dimensions, ScrollView, Modal, BackHandler } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { theme } from '../../theme';
 import { AuthContext } from '../../context/AuthContext';
 import Toast from 'react-native-toast-message';
-import { Store, User, MapPin, Mail, ArrowLeft, Image as ImageIcon, Map, Trash2, Undo, Save, CheckCircle, Phone } from 'lucide-react-native';
+import { Store, User, MapPin, Mail, ArrowLeft, Image as ImageIcon, Map, Trash2, Undo, Save, CheckCircle, Phone, ChevronDown, Tag, Check, X, ShoppingBag, Smartphone, Shirt, Pill, Coffee, Book, Maximize2, Minimize2 } from 'lucide-react-native';
 import { Map as MapLibreMap, Camera, Marker, UserLocation, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { getCurrentLocation } from '../../utils/location';
 import { updateMockShopGeofence } from '../../mockOwnerData';
 
 const { width, height } = Dimensions.get('window');
-const CATEGORIES = ['Groceries', 'Electronics', 'Clothing', 'Pharmacy', 'Bakery', 'Stationery'];
+const CATEGORY_ITEMS = [
+  { name: 'Groceries', icon: ShoppingBag },
+  { name: 'Electronics', icon: Smartphone },
+  { name: 'Clothing', icon: Shirt },
+  { name: 'Pharmacy', icon: Pill },
+  { name: 'Bakery', icon: Coffee },
+  { name: 'Stationery', icon: Book },
+];
 const DEFAULT_CENTER = {
   latitude: 21.2401,
   longitude: 72.8735,
@@ -91,6 +98,8 @@ export const RegisterShopScreen = () => {
   // --- STEP 2: Shop Details ---
   const [shopName, setShopName] = useState('');
   const [shopCategory, setShopCategory] = useState('Groceries');
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  const [shopPhone, setShopPhone] = useState(phone || '');
   const [shopAddress, setShopAddress] = useState('');
   const [bannerUri, setBannerUri] = useState(null);
 
@@ -103,6 +112,19 @@ export const RegisterShopScreen = () => {
   const [radiusKm, setRadiusKm] = useState(5); // default 5km radius
   const [shopLocation, setShopLocation] = useState({ latitude: DEFAULT_CENTER.latitude, longitude: DEFAULT_CENTER.longitude });
   const [mapTapAction, setMapTapAction] = useState('storefront'); // 'storefront' or 'boundary'
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
+  useEffect(() => {
+    const handleBackPress = () => {
+      if (isFullScreen && currentStep === 3) {
+        setIsFullScreen(false);
+        return true;
+      }
+      return false;
+    };
+    const subscription = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
+    return () => subscription.remove();
+  }, [isFullScreen, currentStep]);
 
   // --- Global States ---
   const [submitting, setSubmitting] = useState(false);
@@ -256,11 +278,11 @@ export const RegisterShopScreen = () => {
       }
       setCurrentStep(2);
     } else if (currentStep === 2) {
-      if (!shopName.trim() || !shopAddress.trim()) {
+      if (!shopName.trim() || !shopPhone.trim() || !shopAddress.trim()) {
         Toast.show({
           type: 'error',
           text1: 'Input Validation',
-          text2: 'Please enter both shop name and address.'
+          text2: 'Please enter shop name, contact number, and address.'
         });
         return;
       }
@@ -269,6 +291,9 @@ export const RegisterShopScreen = () => {
   };
 
   const handlePrevStep = () => {
+    if (isFullScreen) {
+      setIsFullScreen(false);
+    }
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
     }
@@ -315,6 +340,28 @@ export const RegisterShopScreen = () => {
     setPolygonPoints([]);
   };
 
+  const getZoomForRadius = (km) => {
+    if (km <= 1) return 14.2;
+    if (km <= 2) return 13.2;
+    if (km <= 3) return 12.6;
+    if (km <= 5) return 11.8;
+    if (km <= 8) return 11.1;
+    if (km <= 10) return 10.8;
+    if (km <= 15) return 10.2;
+    return 9.7;
+  };
+
+  const handleRadiusChange = (km) => {
+    setRadiusKm(km);
+    if (cameraRef.current && shopLocation.latitude && shopLocation.longitude) {
+      cameraRef.current.flyTo({
+        center: [shopLocation.longitude, shopLocation.latitude],
+        zoom: getZoomForRadius(km),
+        duration: 700,
+      });
+    }
+  };
+
   const handleSaveBoundary = async () => {
     const finalPoints = boundaryMode === 'radius' 
       ? getCirclePoints(shopLocation.latitude, shopLocation.longitude, radiusKm) 
@@ -337,6 +384,7 @@ export const RegisterShopScreen = () => {
           ? `Delivery boundary saved with a ${radiusKm}km radius.`
           : `${finalPoints.length} vertices successfully recorded.`
       });
+      setIsFullScreen(false);
       setCurrentStep(4);
     } catch (e) {
       console.error(e);
@@ -363,6 +411,7 @@ export const RegisterShopScreen = () => {
         phone,
         email: ownerEmail.trim(),
         shopName: shopName.trim(),
+        shopPhone: shopPhone.trim(),
         shopAddress: shopAddress.trim(),
         shopCategory,
         shopLatitude: shopLat,
@@ -391,6 +440,7 @@ export const RegisterShopScreen = () => {
   // --- RENDERS ---
 
   const renderStepIndicator = () => {
+    if (isFullScreen && currentStep === 3) return null;
     return (
       <View style={[styles.indicatorContainer, { paddingTop: insets.top + 6 }]}>
         <View style={styles.indicatorHeader}>
@@ -417,7 +467,12 @@ export const RegisterShopScreen = () => {
         return (
           <KeyboardAwareScrollView 
             contentContainerStyle={styles.scrollContent}
+            enableOnAndroid={true}
+            enableAutomaticScroll={true}
             keyboardShouldPersistTaps="handled"
+            extraScrollHeight={100}
+            extraHeight={120}
+            showsVerticalScrollIndicator={false}
           >
             <Text style={styles.sectionHeading}>Tell us about yourself</Text>
             <Text style={styles.sectionSubtitle}>These details are used to set up your partner account.</Text>
@@ -473,7 +528,12 @@ export const RegisterShopScreen = () => {
         return (
           <KeyboardAwareScrollView 
             contentContainerStyle={styles.scrollContent}
+            enableOnAndroid={true}
+            enableAutomaticScroll={true}
             keyboardShouldPersistTaps="handled"
+            extraScrollHeight={100}
+            extraHeight={120}
+            showsVerticalScrollIndicator={false}
           >
             <Text style={styles.sectionHeading}>Your Shop Details</Text>
             <Text style={styles.sectionSubtitle}>Enter details of your local store storefront.</Text>
@@ -494,27 +554,36 @@ export const RegisterShopScreen = () => {
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Shop Category *</Text>
-              <View style={styles.categoryGrid}>
-                {CATEGORIES.map((cat) => {
-                  const isSelected = shopCategory === cat;
-                  return (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[
-                        styles.categoryGridItem,
-                        isSelected && styles.categoryGridItemSelected
-                      ]}
-                      onPress={() => setShopCategory(cat)}
-                    >
-                      <Text style={[
-                        styles.categoryGridText,
-                        isSelected && styles.categoryGridTextSelected
-                      ]}>
-                        {cat}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+              <TouchableOpacity
+                style={styles.textInputContainer}
+                activeOpacity={0.8}
+                onPress={() => setCategoryModalVisible(true)}
+              >
+                {(() => {
+                  const selectedObj = CATEGORY_ITEMS.find(item => item.name === shopCategory);
+                  const IconComp = selectedObj ? selectedObj.icon : Tag;
+                  return <IconComp color={theme.colors.primary} size={22} style={styles.inputIcon} />;
+                })()}
+                <Text style={[styles.textInput, !shopCategory && { color: theme.colors.textLight }]}>
+                  {shopCategory || 'Select Category'}
+                </Text>
+                <ChevronDown color={theme.colors.textLight} size={22} style={{ marginRight: 16 }} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Shop Contact Number *</Text>
+              <View style={styles.textInputContainer}>
+                <Phone color={theme.colors.primary} size={22} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="e.g. 9876543210"
+                  placeholderTextColor={theme.colors.textLight}
+                  keyboardType="phone-pad"
+                  maxLength={15}
+                  value={shopPhone}
+                  onChangeText={setShopPhone}
+                />
               </View>
             </View>
 
@@ -565,52 +634,70 @@ export const RegisterShopScreen = () => {
         return (
           <View style={styles.mapContainer}>
             {/* Top Address & Mode Selection Panel */}
-            <View style={styles.mapTopPanel}>
-              <View style={styles.addressCard}>
-                <MapPin color={theme.colors.primary} size={18} style={{ marginRight: 6 }} />
-                <Text style={styles.addressText} numberOfLines={2}>
-                  {shopAddress || 'No shop address entered.'}
-                </Text>
-              </View>
-
-              <View style={styles.modeToggleRow}>
-                <TouchableOpacity
-                  style={[styles.modeToggleBtn, boundaryMode === 'polygon' && styles.modeToggleBtnActive]}
-                  onPress={() => {
-                    setBoundaryMode('polygon');
-                    setMapTapAction('boundary'); // default to drawing
-                  }}
-                >
-                  <Text style={[styles.modeToggleBtnText, boundaryMode === 'polygon' && styles.modeToggleBtnTextActive]}>
-                    Custom Shape
+            {!isFullScreen && (
+              <View style={styles.mapTopPanel}>
+                <View style={styles.addressCard}>
+                  <MapPin color={theme.colors.primary} size={18} style={{ marginRight: 6 }} />
+                  <Text style={styles.addressText} numberOfLines={2}>
+                    {shopAddress || 'No shop address entered.'}
                   </Text>
-                </TouchableOpacity>
+                </View>
 
-                <TouchableOpacity
-                  style={[styles.modeToggleBtn, boundaryMode === 'radius' && styles.modeToggleBtnActive]}
-                  onPress={() => {
-                    setBoundaryMode('radius');
-                    setMapTapAction('storefront'); // can only place storefront pin
-                  }}
-                >
-                  <Text style={[styles.modeToggleBtnText, boundaryMode === 'radius' && styles.modeToggleBtnTextActive]}>
-                    Radius Circle
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.modeToggleRow}>
+                  <TouchableOpacity
+                    style={[styles.modeToggleBtn, boundaryMode === 'polygon' && styles.modeToggleBtnActive]}
+                    onPress={() => {
+                      setBoundaryMode('polygon');
+                      setMapTapAction('boundary'); // default to drawing
+                      if (cameraRef.current && shopLocation.latitude && shopLocation.longitude) {
+                        cameraRef.current.flyTo({
+                          center: [shopLocation.longitude, shopLocation.latitude],
+                          zoom: 15,
+                          duration: 700,
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={[styles.modeToggleBtnText, boundaryMode === 'polygon' && styles.modeToggleBtnTextActive]}>
+                      Custom Shape
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modeToggleBtn, boundaryMode === 'radius' && styles.modeToggleBtnActive]}
+                    onPress={() => {
+                      setBoundaryMode('radius');
+                      setMapTapAction('storefront'); // can only place storefront pin
+                      if (cameraRef.current && shopLocation.latitude && shopLocation.longitude) {
+                        cameraRef.current.flyTo({
+                          center: [shopLocation.longitude, shopLocation.latitude],
+                          zoom: getZoomForRadius(radiusKm),
+                          duration: 700,
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={[styles.modeToggleBtnText, boundaryMode === 'radius' && styles.modeToggleBtnTextActive]}>
+                      Radius Circle
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            )}
 
             {/* Banner Instructions */}
-            <View style={styles.mapInstructionBanner}>
-              <Map color="#FFF" size={18} style={{ marginRight: 8 }} />
-              <Text style={styles.mapInstructionText}>
-                {boundaryMode === 'radius'
-                  ? 'Tap map to set storefront pin. Adjust circle radius below.'
-                  : mapTapAction === 'storefront'
-                    ? 'Tap map to set storefront pin. Toggle to "Draw Boundary" to trace.'
-                    : 'Tap map to draw delivery boundary (at least 3 points).'}
-              </Text>
-            </View>
+            {!isFullScreen && (
+              <View style={styles.mapInstructionBanner}>
+                <Map color="#FFF" size={18} style={{ marginRight: 8 }} />
+                <Text style={styles.mapInstructionText}>
+                  {boundaryMode === 'radius'
+                    ? 'Tap map to set storefront pin. Adjust circle radius below.'
+                    : mapTapAction === 'storefront'
+                      ? 'Tap map to set storefront pin. Toggle to "Draw Boundary" to trace.'
+                      : 'Tap map to draw delivery boundary (at least 3 points).'}
+                </Text>
+              </View>
+            )}
 
             {loadingLocation ? (
               <View style={styles.mapLoader}>
@@ -618,9 +705,10 @@ export const RegisterShopScreen = () => {
                 <Text style={styles.mapLoaderText}>Locating storefront...</Text>
               </View>
             ) : (
-              <MapLibreMap
-                style={styles.mapView}
-                mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+              <View style={{ flex: 1, position: 'relative' }}>
+                <MapLibreMap
+                  style={styles.mapView}
+                  mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
                 logoEnabled={false}
                 attributionEnabled={false}
                 androidView="surface"
@@ -721,6 +809,29 @@ export const RegisterShopScreen = () => {
                   </GeoJSONSource>
                 )}
               </MapLibreMap>
+
+              {/* Floating Full Screen Button */}
+              <TouchableOpacity
+                style={[
+                  styles.fullScreenToggleBtn,
+                  { top: isFullScreen ? (Platform.OS === 'ios' ? insets.top + 12 : 24) : 14 }
+                ]}
+                activeOpacity={0.85}
+                onPress={() => setIsFullScreen(!isFullScreen)}
+              >
+                {isFullScreen ? (
+                  <>
+                    <Minimize2 color="#FFF" size={16} style={{ marginRight: 6 }} />
+                    <Text style={styles.fullScreenToggleText}>Exit Full Screen</Text>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 color="#FFF" size={16} style={{ marginRight: 6 }} />
+                    <Text style={styles.fullScreenToggleText}>Full Screen</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
             )}
 
             {/* Map Action Buttons Overlay */}
@@ -761,7 +872,7 @@ export const RegisterShopScreen = () => {
                       <TouchableOpacity
                         key={km}
                         style={[styles.radiusChip, radiusKm === km && styles.radiusChipActive]}
-                        onPress={() => setRadiusKm(km)}
+                        onPress={() => handleRadiusChange(km)}
                       >
                         <Text style={[styles.radiusChipText, radiusKm === km && styles.radiusChipTextActive]}>
                           {km}km
@@ -845,6 +956,10 @@ export const RegisterShopScreen = () => {
                 <Text style={styles.confirmValue}>{shopName} ({shopCategory})</Text>
               </View>
               <View style={styles.confirmRow}>
+                <Phone color={theme.colors.primary} size={18} style={styles.confirmIcon} />
+                <Text style={styles.confirmValue}>{shopPhone}</Text>
+              </View>
+              <View style={styles.confirmRow}>
                 <MapPin color={theme.colors.primary} size={18} style={styles.confirmIcon} />
                 <Text style={styles.confirmValue}>{shopAddress}</Text>
               </View>
@@ -884,6 +999,53 @@ export const RegisterShopScreen = () => {
     <View style={styles.container}>
       {renderStepIndicator()}
       <View style={styles.body}>{renderStepContent()}</View>
+
+      {/* Category Dropdown Modal */}
+      <Modal
+        visible={categoryModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setCategoryModalVisible(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setCategoryModalVisible(false)}
+        >
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Shop Category</Text>
+              <TouchableOpacity onPress={() => setCategoryModalVisible(false)} style={styles.closeBtn}>
+                <X color={theme.colors.textDark} size={22} />
+              </TouchableOpacity>
+            </View>
+            {CATEGORY_ITEMS.map((item) => {
+              const isSelected = shopCategory === item.name;
+              const IconComp = item.icon;
+              return (
+                <TouchableOpacity
+                  key={item.name}
+                  style={[styles.modalItem, isSelected && styles.modalItemSelected]}
+                  onPress={() => {
+                    setShopCategory(item.name);
+                    setCategoryModalVisible(false);
+                  }}
+                >
+                  <View style={styles.modalItemLeft}>
+                    <View style={[styles.categoryModalIcon, isSelected && styles.categoryModalIconSelected]}>
+                      <IconComp color={isSelected ? theme.colors.primary : theme.colors.textDark} size={20} />
+                    </View>
+                    <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelected]}>
+                      {item.name}
+                    </Text>
+                  </View>
+                  {isSelected && <Check color={theme.colors.primary} size={20} strokeWidth={3} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -989,32 +1151,78 @@ const styles = StyleSheet.create({
     height: 90,
     paddingTop: 10,
   },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  categoryGridItem: {
-    backgroundColor: theme.colors.surface,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-    width: '48%', // Grid layout
-    paddingVertical: 14,
-    borderRadius: 16,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingHorizontal: 24,
   },
-  categoryGridItemSelected: {
-    backgroundColor: theme.colors.primary,
-    borderColor: theme.colors.primary,
+  modalContent: {
+    width: '100%',
+    backgroundColor: theme.colors.surface,
+    borderRadius: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 10,
   },
-  categoryGridText: {
-    fontSize: 16,
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1.5,
+    borderBottomColor: theme.colors.border,
+  },
+  modalTitle: {
+    fontSize: 20,
     fontWeight: '800',
-    color: theme.colors.textLight,
+    color: theme.colors.textDark,
   },
-  categoryGridTextSelected: {
-    color: theme.colors.white,
+  closeBtn: {
+    padding: 4,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  modalItemSelected: {
+    backgroundColor: '#E8F5E9',
+  },
+  modalItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  categoryModalIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#F0F2F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  categoryModalIconSelected: {
+    backgroundColor: '#C8E6C9',
+  },
+  modalItemText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: theme.colors.textDark,
+  },
+  modalItemTextSelected: {
+    color: theme.colors.primary,
+    fontWeight: '800',
   },
   imagePlaceholder: {
     height: 120,
@@ -1110,6 +1318,27 @@ const styles = StyleSheet.create({
   },
   mapView: {
     flex: 1,
+  },
+  fullScreenToggleBtn: {
+    position: 'absolute',
+    right: 14,
+    backgroundColor: theme.colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    zIndex: 20,
+  },
+  fullScreenToggleText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   markerContainer: {
     width: 24,
