@@ -68,12 +68,10 @@ export const ProfileSetupScreen = () => {
       if (isVerified) {
         // User already verified OTP via Login Screen
         const res = await authService.createProfile({ phone, name, email, dob, photo, language: appLanguage || 'en' });
-        Toast.show({ type: 'success', text1: 'Profile Created!', text2: 'Welcome to Local Shops.' });
         await login(res.token, res.customer);
       } else {
         // Normal registration flow
         await authService.sendOtp(phone);
-        Toast.show({ type: 'success', text1: 'OTP Sent', text2: 'Check your messages for the code.' });
         
         navigation.navigate('VerifyOTP', { 
           phone, 

@@ -3,7 +3,11 @@ import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 import { promptForEnableLocationIfNeeded } from 'react-native-android-location-enabler';
 import Geolocation from '@react-native-community/geolocation';
 
-export const ensureLocationReady = () => {
+// The alerts below are customer-facing, so they need the active language. This
+// util has no hook of its own — the calling screen threads its `t` in (via
+// getCurrentLocation). `t` is optional so an older caller still renders copy
+// rather than crashing.
+export const ensureLocationReady = (t = (k, fallback) => fallback ?? k) => {
   return new Promise(async (resolve, reject) => {
     try {
       // 1. Check & Request Permissions
@@ -23,11 +27,11 @@ export const ensureLocationReady = () => {
 
       if (permStatus === RESULTS.BLOCKED || permStatus === RESULTS.DENIED) {
         Alert.alert(
-          'Location Permission Required',
-          'We need your location to find shops near you. Please enable it in settings.',
+          t('locPermTitle', 'Location Permission Required'),
+          t('locPermBody', 'We need your location to find shops near you. Please enable it in settings.'),
           [
-            { text: 'Cancel', style: 'cancel', onPress: () => reject(new Error('Permission denied')) },
-            { text: 'Open Settings', onPress: () => { Linking.openSettings(); reject(new Error('Opened settings')); } }
+            { text: t('cancel', 'Cancel'), style: 'cancel', onPress: () => reject(new Error('Permission denied')) },
+            { text: t('openSettingsBtn', 'Open Settings'), onPress: () => { Linking.openSettings(); reject(new Error('Opened settings')); } }
           ]
         );
         return; // Early return, rejected in onPress
@@ -82,11 +86,11 @@ export const ensureLocationReady = () => {
           console.warn('[LocationHelper] Low accuracy failed:', lowAccErr);
           if (Platform.OS === 'ios' && lowAccErr.code === 2) { // POSITION_UNAVAILABLE
             Alert.alert(
-              'Location Services Disabled',
-              'Please turn on Location Services in Settings > Privacy > Location Services.',
+              t('locServicesDisabled', 'Location Services Disabled'),
+              t('locServicesDisabledBody', 'Please turn on Location Services in Settings > Privacy > Location Services.'),
               [
-                { text: 'Cancel', style: 'cancel', onPress: () => reject(lowAccErr) },
-                { text: 'Open Settings', onPress: () => { Linking.openSettings(); reject(lowAccErr); } }
+                { text: t('cancel', 'Cancel'), style: 'cancel', onPress: () => reject(lowAccErr) },
+                { text: t('openSettingsBtn', 'Open Settings'), onPress: () => { Linking.openSettings(); reject(lowAccErr); } }
               ]
             );
           } else {

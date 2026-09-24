@@ -1,3 +1,10 @@
 <resources>
-    <string name="app_name">Local Shops Owner</string>
+    <string name="app_name">Paasora Partner</string>
+
+    <!-- Notification channels, as listed under the app in system settings.
+         Ids live in MainApplication.kt and the backend's push-channels.ts. -->
+    <string name="channel_new_orders">New orders</string>
+    <string name="channel_orders">Order updates</string>
+    <string name="channel_account">Shop and payments</string>
+    <string name="channel_general">General</string>
 </resources>

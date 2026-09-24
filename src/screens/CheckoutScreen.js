@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axiosClient from '../api/axiosClient';
 import { theme } from '../theme';
-import { ArrowLeft, MapPin, CreditCard, Receipt, Tag, ChevronDown, CheckCircle2, Circle, Book } from 'lucide-react-native';
+import { ArrowLeft, MapPin, CreditCard, Tag, ChevronDown, CheckCircle2, Circle, Banknote, BookOpen, ShoppingBag, Smartphone } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const CheckoutScreen = ({ route, navigation }) => {
@@ -79,9 +79,9 @@ export const CheckoutScreen = ({ route, navigation }) => {
   });
   
   const deliveryFee = 0.00;
-  const taxes = subtotal * 0.05; // 5% tax
+  const taxes = 0;
   const promoDiscount = 50.00;
-  const total = (subtotal + deliveryFee + taxes) - promoDiscount;
+  const total = (subtotal + deliveryFee) - promoDiscount;
 
   const handlePlaceOrder = () => {
     if (!selectedAddressId) {
@@ -198,7 +198,7 @@ export const CheckoutScreen = ({ route, navigation }) => {
                 <Text style={styles.paymentTitle}>Cash on Delivery</Text>
                 <Text style={styles.paymentSub}>Pay when your order arrives</Text>
               </View>
-              <Receipt color={theme.colors.textLight} size={24} />
+              <Banknote color={paymentMethod === 'cod' ? '#006B54' : theme.colors.textLight} size={24} />
             </View>
           </TouchableOpacity>
 
@@ -217,7 +217,7 @@ export const CheckoutScreen = ({ route, navigation }) => {
                 <Text style={styles.paymentTitle}>Udhar / Khata</Text>
                 <Text style={styles.paymentSub}>Buy now, pay later (Pending Shop Approval)</Text>
               </View>
-              <Book color={theme.colors.textLight} size={24} />
+              <BookOpen color={paymentMethod === 'udhar' ? '#006B54' : theme.colors.textLight} size={24} />
             </View>
           </TouchableOpacity>
         </View>
@@ -226,7 +226,7 @@ export const CheckoutScreen = ({ route, navigation }) => {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={{flexDirection: 'row', alignItems: 'center'}}>
-              <Receipt color="#006B54" size={20} style={{marginRight: 8}} />
+              <ShoppingBag color="#006B54" size={20} style={{marginRight: 8}} />
               <Text style={styles.cardTitle}>Order Summary</Text>
             </View>
             <ChevronDown color={theme.colors.text} size={20} />
@@ -253,10 +253,6 @@ export const CheckoutScreen = ({ route, navigation }) => {
             <View style={styles.summaryLine}>
               <Text style={styles.summaryLineLabel}>Delivery Fee</Text>
               <Text style={[styles.summaryLineValue, {color: '#006B54', fontWeight: 'bold'}]}>FREE</Text>
-            </View>
-            <View style={styles.summaryLine}>
-              <Text style={styles.summaryLineLabel}>Taxes & Charges</Text>
-              <Text style={styles.summaryLineValue}>₹{taxes.toFixed(2)}</Text>
             </View>
           </View>
 

@@ -2,8 +2,10 @@ import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { theme } from '../theme';
 import { Plus, Minus, Heart } from 'lucide-react-native';
+import { useTranslation } from '../constants/translations';
 
 const ProductCard = ({ product, cartItem, onQtyChange, isWishlisted, onWishlistToggle, style, variant = 'vertical' }) => {
+  const { t } = useTranslation();
   const quantity = cartItem?.quantity || 0;
 
   if (variant === 'horizontal') {
@@ -36,7 +38,7 @@ const ProductCard = ({ product, cartItem, onQtyChange, isWishlisted, onWishlistT
               </View>
             ) : (
               <TouchableOpacity style={styles.horizontalAddButton} onPress={() => onQtyChange(product.id, 1)}>
-                <Text style={styles.horizontalAddText}>ADD</Text>
+                <Text style={styles.horizontalAddText}>{t('addBtnShort')}</Text>
               </TouchableOpacity>
             )}
           </View>

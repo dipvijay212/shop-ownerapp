@@ -114,7 +114,7 @@ export const ShopStorefrontScreen = ({ route }) => {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <ArrowLeft color="#006B54" size={26} />
           </TouchableOpacity>
-          <Text style={styles.navTitle}>Local Shops</Text>
+          <Text style={styles.navTitle}>Paasora</Text>
         </View>
         <View style={styles.avatarContainer}>
           <Image source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' }} style={styles.avatar} />
@@ -134,7 +134,7 @@ export const ShopStorefrontScreen = ({ route }) => {
             </View>
           </View>
           <Text style={styles.shopNameOverlay}>{shop.name}</Text>
-          <Text style={styles.shopAddressOverlay}>{shop.address} • 0.4 miles away</Text>
+          <Text style={styles.shopAddressOverlay}>{shop.address_line || shop.address || 'Local Store Address'} • 0.4 miles away</Text>
         </View>
       </View>
 

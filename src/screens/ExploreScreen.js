@@ -7,6 +7,7 @@ import axiosClient from '../api/axiosClient';
 import { ensureLocationReady } from '../utils/locationHelper';
 import { theme } from '../theme';
 import { Search, LayoutGrid, Crosshair, Store, MapPin, Star, X, Navigation } from 'lucide-react-native';
+import { formatShopCategories } from '../constants/shopCategories';
 
 export const ExploreScreen = () => {
   const navigation = useNavigation();
@@ -63,14 +64,25 @@ export const ExploreScreen = () => {
     let result = nearbyShops;
     
     if (selectedCategory !== 'All') {
-      result = result.filter(shop => shop.category === selectedCategory);
+      result = result.filter(shop => {
+        if (!shop.category) return false;
+        if (Array.isArray(shop.category)) {
+          return shop.category.includes(selectedCategory);
+        }
+        return shop.category === selectedCategory;
+      });
     }
     
     if (searchQuery.trim()) {
       const lowerQuery = searchQuery.toLowerCase();
       result = result.filter(shop => {
         const matchName = shop.name && shop.name.toLowerCase().includes(lowerQuery);
-        const matchCategory = shop.category && shop.category.toLowerCase().includes(lowerQuery);
+        let matchCategory = false;
+        if (Array.isArray(shop.category)) {
+          matchCategory = shop.category.some(c => c && c.toLowerCase().includes(lowerQuery));
+        } else if (shop.category) {
+          matchCategory = shop.category.toLowerCase().includes(lowerQuery);
+        }
         return matchName || matchCategory;
       });
     }
@@ -80,7 +92,15 @@ export const ExploreScreen = () => {
 
   const availableCategories = useMemo(() => {
     if (!nearbyShops) return ['All'];
-    return ['All', ...new Set(nearbyShops.map(s => s.category).filter(Boolean))];
+    const set = new Set();
+    nearbyShops.forEach(s => {
+      if (Array.isArray(s.category)) {
+        s.category.forEach(c => c && set.add(c));
+      } else if (s.category) {
+        set.add(s.category);
+      }
+    });
+    return ['All', ...Array.from(set)];
   }, [nearbyShops]);
 
   const suggestions = useMemo(() => {
@@ -92,7 +112,13 @@ export const ExploreScreen = () => {
       if (shop.name && shop.name.toLowerCase().includes(lowerQuery)) {
         matches.add(shop.name);
       }
-      if (shop.category && shop.category.toLowerCase().includes(lowerQuery)) {
+      if (Array.isArray(shop.category)) {
+        shop.category.forEach(c => {
+          if (c && c.toLowerCase().includes(lowerQuery)) {
+            matches.add(c);
+          }
+        });
+      } else if (shop.category && shop.category.toLowerCase().includes(lowerQuery)) {
         matches.add(shop.category);
       }
     });
@@ -326,7 +352,7 @@ export const ExploreScreen = () => {
             <Image source={{ uri: selectedShop.banner_url || 'https://images.unsplash.com/photo-1542838132-92c53300491e' }} style={styles.shopPopupImage} />
             <View style={styles.shopPopupContent}>
               <Text style={styles.shopPopupName} numberOfLines={1}>{selectedShop.name}</Text>
-              <Text style={styles.shopPopupCategory}>{selectedShop.category}</Text>
+              <Text style={styles.shopPopupCategory}>{formatShopCategories(selectedShop.category)}</Text>
               <View style={styles.shopPopupMeta}>
                 <View style={styles.shopPopupRating}>
                   <Star color="#F59E0B" fill="#F59E0B" size={14} />

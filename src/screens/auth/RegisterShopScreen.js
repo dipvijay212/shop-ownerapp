@@ -1,26 +1,25 @@
-import React, { useState, useEffect, useContext, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, ActivityIndicator, SafeAreaView, Platform, Dimensions, ScrollView, Modal, BackHandler } from 'react-native';
+import React, { useState, useEffect, useContext, useRef, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, ActivityIndicator, SafeAreaView, Platform, Dimensions, ScrollView, Modal, BackHandler, StatusBar, Alert, Keyboard } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { theme } from '../../theme';
 import { AuthContext } from '../../context/AuthContext';
 import Toast from 'react-native-toast-message';
-import { Store, User, MapPin, Mail, ArrowLeft, Image as ImageIcon, Map, Trash2, Undo, Save, CheckCircle, Phone, ChevronDown, Tag, Check, X, ShoppingBag, Smartphone, Shirt, Pill, Coffee, Book, Maximize2, Minimize2 } from 'lucide-react-native';
-import { Map as MapLibreMap, Camera, Marker, UserLocation, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
+import {
+  Store, User, MapPin, Mail, ArrowLeft, Image as ImageIcon, Map, Trash2, Undo, Save, CheckCircle,
+  Phone, ChevronDown, ChevronUp, Tag, Check, X, Maximize2, Minimize2, Search, Compass, Upload
+} from 'lucide-react-native';
+import MapView, { Marker, Polygon, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { getCurrentLocation } from '../../utils/location';
-import { updateMockShopGeofence } from '../../mockOwnerData';
+import { getCategoryColor, getCategoryIcon } from '../../constants/shopCategories';
+import { api } from '../../api';
+import { useTranslation } from '../../constants/translations';
+import { useFormErrors } from '../../hooks/useFormErrors';
 
 const { width, height } = Dimensions.get('window');
-const CATEGORY_ITEMS = [
-  { name: 'Groceries', icon: ShoppingBag },
-  { name: 'Electronics', icon: Smartphone },
-  { name: 'Clothing', icon: Shirt },
-  { name: 'Pharmacy', icon: Pill },
-  { name: 'Bakery', icon: Coffee },
-  { name: 'Stationery', icon: Book },
-];
+
 const DEFAULT_CENTER = {
   latitude: 21.2401,
   longitude: 72.8735,
@@ -85,9 +84,15 @@ export const RegisterShopScreen = () => {
   const insets = useSafeAreaInsets();
   const route = useRoute();
   const navigation = useNavigation();
-  const { phone } = route.params || { phone: '9876543210' }; // pre-filled/read-only from OTP
-  
-  const { registerShop } = useContext(AuthContext);
+  const { registerShop, logout, owner } = useContext(AuthContext);
+
+  // Route params only exist on the AuthStack path (straight after OTP). When
+  // RootNavigator mounts this screen for a signed-in owner there are none, and
+  // the old fallback showed a hardcoded '9876543210' next to the label
+  // "Mobile Number (Verified)" — a number the owner never entered. The verified
+  // profile is the real source.
+  const phone = route.params?.phone || owner?.phone || '';
+  const { t } = useTranslation();
 
   const [currentStep, setCurrentStep] = useState(1);
 
@@ -97,22 +102,89 @@ export const RegisterShopScreen = () => {
 
   // --- STEP 2: Shop Details ---
   const [shopName, setShopName] = useState('');
-  const [shopCategory, setShopCategory] = useState('Groceries');
-  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  // Ids, not names: createShop() takes category_ids from the master, and the
+  // names are only ever used for display.
+  const [shopCategoryIds, setShopCategoryIds] = useState([]);
+  const [categoryOptions, setCategoryOptions] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoriesError, setCategoriesError] = useState(null);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const [categorySearchQuery, setCategorySearchQuery] = useState('');
+
+  const loadCategories = useCallback(async () => {
+    setCategoriesLoading(true);
+    setCategoriesError(null);
+    try {
+      const list = await api.shop.listShopCategories();
+      setCategoryOptions(list || []);
+    } catch (e) {
+      // Step 2 cannot be completed without this, so surface it inline with a
+      // retry rather than failing silently and blocking Continue with no reason.
+      setCategoriesError(e.message || 'Could not load shop categories.');
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCategories().catch((e) => console.error('[RegisterShop] category load rejected', e));
+  }, [loadCategories]);
+
+  const toggleShopCategory = (catId) => {
+    setShopCategoryIds((prev) =>
+      prev.includes(catId) ? prev.filter((c) => c !== catId) : [...prev, catId],
+    );
+    clearError('shopCategory');
+  };
+
+  const selectedCategories = useMemo(
+    () => shopCategoryIds.map((id) => categoryOptions.find((c) => c.id === id)).filter(Boolean),
+    [shopCategoryIds, categoryOptions],
+  );
+
+  const filteredCategories = useMemo(() => {
+    if (!categorySearchQuery.trim()) return categoryOptions;
+    const q = categorySearchQuery.toLowerCase();
+    return categoryOptions.filter((item) => item.name.toLowerCase().includes(q));
+  }, [categorySearchQuery, categoryOptions]);
   const [shopPhone, setShopPhone] = useState(phone || '');
   const [shopAddress, setShopAddress] = useState('');
   const [bannerUri, setBannerUri] = useState(null);
 
   // --- STEP 3: Delivery Boundary ---
-  const cameraRef = useRef(null);
   const [polygonPoints, setPolygonPoints] = useState([]);
   const [mapRegion, setMapRegion] = useState(DEFAULT_CENTER);
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [boundaryMode, setBoundaryMode] = useState('polygon'); // 'polygon' or 'radius'
   const [radiusKm, setRadiusKm] = useState(5); // default 5km radius
   const [shopLocation, setShopLocation] = useState({ latitude: DEFAULT_CENTER.latitude, longitude: DEFAULT_CENTER.longitude });
-  const [mapTapAction, setMapTapAction] = useState('storefront'); // 'storefront' or 'boundary'
+  const [mapTapAction, setMapTapAction] = useState('boundary'); // 'storefront' or 'boundary'
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const mapRef = useRef(null);
+
+  // Reaching this screen means the OTP was already verified and a token pair is
+  // stored, so "log in as someone else" is really "drop this session". Without
+  // it Step 1 is a dead end: there is no back control, and on Android the
+  // hardware back key would simply close the app.
+  const handleExitToLogin = useCallback(() => {
+    Alert.alert(
+      t('exitOnboardingTitle', 'Sign in with a different number?'),
+      t(
+        'exitOnboardingBody',
+        "You'll be signed out and returned to the login screen. Details you've entered here are not saved.",
+      ),
+      [
+        { text: t('cancel', 'Cancel'), style: 'cancel' },
+        {
+          text: t('logout', 'Log Out'),
+          style: 'destructive',
+          onPress: () => {
+            logout().catch((e) => console.error('[RegisterShop] logout rejected', e));
+          },
+        },
+      ],
+    );
+  }, [logout, t]);
 
   useEffect(() => {
     const handleBackPress = () => {
@@ -120,14 +192,59 @@ export const RegisterShopScreen = () => {
         setIsFullScreen(false);
         return true;
       }
-      return false;
+      if (currentStep > 1) {
+        handlePrevStep();
+        return true;
+      }
+      // Step 1 — offer the way out instead of letting the OS close the app.
+      handleExitToLogin();
+      return true;
     };
     const subscription = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
     return () => subscription.remove();
-  }, [isFullScreen, currentStep]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFullScreen, currentStep, handleExitToLogin]);
 
   // --- Global States ---
   const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
+  // The screen already highlighted the bad fields; it just never moved the
+  // view to them, so on step 2 the address error sat below the fold.
+  const form = useFormErrors();
+
+  // A new step must start at ITS top with the keyboard down. Advancing while a
+  // field was focused left the keyboard up, and KeyboardAwareScrollView then
+  // scrolled the new step to whichever input it considered focused — landing
+  // on Shop Contact Number, with Shop Name and Categories hidden above the
+  // fold. Owners filled in what they could see and missed the rest.
+  useEffect(() => {
+    Keyboard.dismiss();
+    // The new step's scroll view mounts on this render, so scroll once it exists.
+    const id = setTimeout(() => {
+      const scroller = form.scrollRef.current;
+      if (!scroller) return;
+      if (typeof scroller.scrollToPosition === 'function') {
+        scroller.scrollToPosition(0, 0, false);
+      } else if (typeof scroller.scrollTo === 'function') {
+        scroller.scrollTo({ y: 0, animated: false });
+      }
+    }, 50);
+    return () => clearTimeout(id);
+  }, [currentStep, form.scrollRef]);
+  const scrollToFirstError = (newErrors, order) => {
+    const first = order.find((f) => newErrors[f]);
+    if (first) form.setError(first, newErrors[first]);
+  };
+
+  const clearError = (field) => {
+    if (errors[field]) {
+      setErrors(prev => {
+        const copy = { ...prev };
+        delete copy[field];
+        return copy;
+      });
+    }
+  };
 
   // GeoJSON computations for MapLibre shapes
   const lineGeoJson = useMemo(() => {
@@ -145,7 +262,6 @@ export const RegisterShopScreen = () => {
   const polygonGeoJson = useMemo(() => {
     if (polygonPoints.length < 3) return null;
     const coords = polygonPoints.map(p => [p.longitude, p.latitude]);
-    // Close the polygon shape by making the last coordinate match the first
     coords.push([polygonPoints[0].longitude, polygonPoints[0].latitude]);
     return {
       type: 'Feature',
@@ -156,6 +272,29 @@ export const RegisterShopScreen = () => {
       },
     };
   }, [polygonPoints]);
+
+  const makeCircleGeoJson = (lat, lng, radiusKm, points = 64) => {
+    const coords = [];
+    const kmInDeg = 1 / 111.32;
+    for (let i = 0; i < points; i++) {
+      const angle = (i * 360) / points;
+      const rad = (angle * Math.PI) / 180;
+      const dx = radiusKm * Math.cos(rad);
+      const dy = radiusKm * Math.sin(rad);
+      const pointLat = lat + dy * kmInDeg;
+      const pointLng = lng + (dx * kmInDeg) / Math.cos((lat * Math.PI) / 180);
+      coords.push([pointLng, pointLat]);
+    }
+    coords.push(coords[0]);
+    return {
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'Polygon',
+        coordinates: [coords],
+      },
+    };
+  };
 
   const radiusCircleGeoJson = useMemo(() => {
     if (boundaryMode !== 'radius' || !shopLocation.latitude || !shopLocation.longitude) return null;
@@ -168,50 +307,12 @@ export const RegisterShopScreen = () => {
       const fetchLocation = async () => {
         setLoadingLocation(true);
         try {
-          // Check if address matches any specific location key in Surat
-          const cleanAddr = shopAddress ? shopAddress.toLowerCase() : '';
-          let targetCoords = null;
-
-          if (cleanAddr.includes('dindoli')) {
-            targetCoords = { latitude: 21.1610, longitude: 72.8633 };
-          } else if (cleanAddr.includes('vesu')) {
-            targetCoords = { latitude: 21.1415, longitude: 72.7712 };
-          } else if (cleanAddr.includes('adajan')) {
-            targetCoords = { latitude: 21.2154, longitude: 72.7915 };
-          } else if (cleanAddr.includes('city light')) {
-            targetCoords = { latitude: 21.2215, longitude: 72.8095 };
-          } else if (cleanAddr.includes('piplod')) {
-            targetCoords = { latitude: 21.1712, longitude: 72.7845 };
-          } else if (cleanAddr.includes('athwa')) {
-            targetCoords = { latitude: 21.1895, longitude: 72.8012 };
-          }
-
-          if (targetCoords) {
-            // Address matched, center on target area coordinates
-            const region = {
-              latitude: targetCoords.latitude,
-              longitude: targetCoords.longitude,
-              latitudeDelta: 0.015,
-              longitudeDelta: 0.015,
-            };
-            setMapRegion(region);
-            setShopLocation(targetCoords);
-            
-            if (cameraRef.current) {
-              cameraRef.current.flyTo({
-                center: [targetCoords.longitude, targetCoords.latitude],
-                zoom: 15,
-                duration: 1000
-              });
-            }
-            Toast.show({
-              type: 'success',
-              text1: 'Address Located',
-              text2: `Centered map on matching neighborhood: ${shopAddress}`
-            });
+          const coords = await getCurrentLocation(t);
+          setShopLocation({ latitude: coords.latitude, longitude: coords.longitude });
+          
+          if (boundaryMode === 'radius') {
+            fitCircleInView(coords.latitude, coords.longitude, radiusKm);
           } else {
-            // Fallback to GPS location
-            const coords = await getCurrentLocation();
             const region = {
               latitude: coords.latitude,
               longitude: coords.longitude,
@@ -219,30 +320,51 @@ export const RegisterShopScreen = () => {
               longitudeDelta: 0.015,
             };
             setMapRegion(region);
-            setShopLocation({ latitude: coords.latitude, longitude: coords.longitude });
-            
-            if (cameraRef.current) {
-              cameraRef.current.flyTo({
-                center: [coords.longitude, coords.latitude],
-                zoom: 15,
-                duration: 1000
-              });
+            if (mapRef.current) {
+              mapRef.current.animateToRegion(region, 1000);
             }
           }
         } catch (e) {
           console.warn('[RegisterShop] Geolocation error, using fallback:', e);
-          Toast.show({
-            type: 'info',
-            text1: 'Location Service',
-            text2: 'Could not fetch current location. Centered on fallback Surat area.'
-          });
         } finally {
           setLoadingLocation(false);
         }
       };
       fetchLocation();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, shopAddress]);
+
+  const handleRecenterGPS = async () => {
+    setLoadingLocation(true);
+    try {
+      const coords = await getCurrentLocation(t);
+      setShopLocation({ latitude: coords.latitude, longitude: coords.longitude });
+      if (boundaryMode === 'radius') {
+        fitCircleInView(coords.latitude, coords.longitude, radiusKm);
+      } else {
+        const region = {
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          latitudeDelta: 0.015,
+          longitudeDelta: 0.015,
+        };
+        setMapRegion(region);
+        if (mapRef.current) {
+          mapRef.current.animateToRegion(region, 800);
+        }
+      }
+    } catch (e) {
+      console.warn('[RegisterShop] Recenter location error:', e);
+      Toast.show({
+        type: 'error',
+        text1: t('locationErrorTitle'),
+        text2: t('couldNotFetchGps')
+      });
+    } finally {
+      setLoadingLocation(false);
+    }
+  };
 
   const selectBannerImage = () => {
     const options = {
@@ -256,7 +378,7 @@ export const RegisterShopScreen = () => {
         console.log('ImagePicker Error: ', response.errorMessage);
         Toast.show({
           type: 'error',
-          text1: 'Image Selector Error',
+          text1: t('imageSelectorError'),
           text2: response.errorMessage || 'Failed to select image.'
         });
       } else if (response.assets && response.assets.length > 0) {
@@ -266,27 +388,59 @@ export const RegisterShopScreen = () => {
     });
   };
 
+  const isValidEmail = (email) => {
+    if (!email || !email.trim()) return true;
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    return emailRegex.test(email.trim());
+  };
+
   const handleNextStep = () => {
+    const newErrors = {};
     if (currentStep === 1) {
       if (!ownerName.trim()) {
-        Toast.show({
-          type: 'error',
-          text1: 'Input Validation',
-          text2: 'Please enter your full name.'
-        });
+        newErrors.ownerName = 'Please enter your full name';
+      }
+      if (ownerEmail.trim() && !isValidEmail(ownerEmail)) {
+        newErrors.ownerEmail = 'Please enter a valid email address (e.g. name@domain.com)';
+      }
+
+      if (Object.keys(newErrors).length > 0) {
+        setErrors(newErrors);
+        scrollToFirstError(newErrors, ['ownerName', 'ownerEmail']);
         return;
       }
+      setErrors({});
       setCurrentStep(2);
     } else if (currentStep === 2) {
-      if (!shopName.trim() || !shopPhone.trim() || !shopAddress.trim()) {
-        Toast.show({
-          type: 'error',
-          text1: 'Input Validation',
-          text2: 'Please enter shop name, contact number, and address.'
-        });
+      if (!shopName.trim()) {
+        newErrors.shopName = 'Please enter shop name';
+      }
+      if (shopCategoryIds.length === 0) {
+        newErrors.shopCategory = categoriesError
+          ? 'Shop categories could not be loaded. Tap retry above.'
+          : 'Please select at least one category';
+      }
+      if (!shopPhone.trim()) {
+        newErrors.shopPhone = 'Please enter contact number';
+      }
+      if (!shopAddress.trim()) {
+        newErrors.shopAddress = 'Please enter shop address';
+      }
+
+      if (Object.keys(newErrors).length > 0) {
+        setErrors(newErrors);
+        scrollToFirstError(newErrors, ['shopName', 'shopCategory', 'shopPhone', 'shopAddress']);
         return;
       }
+      setErrors({});
       setCurrentStep(3);
+    } else if (currentStep === 3) {
+      if (boundaryMode === 'polygon' && polygonPoints.length < 3) {
+        Toast.show({ type: 'error', text1: t('boundaryRequired'), text2: t('boundaryRequiredSub') });
+        return;
+      }
+      setErrors({});
+      setCurrentStep(4);
     }
   };
 
@@ -299,34 +453,21 @@ export const RegisterShopScreen = () => {
     }
   };
 
-  const handleMapPress = (event) => {
-    let coord = null;
-    if (event.coordinates) {
-      coord = event.coordinates;
-    } else if (event.nativeEvent) {
-      if (event.nativeEvent.coordinate) {
-        coord = [event.nativeEvent.coordinate.longitude, event.nativeEvent.coordinate.latitude];
-      } else if (event.nativeEvent.coordinates) {
-        coord = event.nativeEvent.coordinates;
-      } else if (event.nativeEvent.lngLat) {
-        const lngLat = event.nativeEvent.lngLat;
-        if (Array.isArray(lngLat)) {
-          coord = lngLat;
-        } else if (lngLat && typeof lngLat === 'object') {
-          coord = [lngLat.lng ?? lngLat.longitude, lngLat.lat ?? lngLat.latitude];
-        }
-      }
-    }
-    
-    if (coord && coord.length >= 2) {
-      const [longitude, latitude] = coord;
-      if (mapTapAction === 'storefront') {
-        setShopLocation({ latitude, longitude });
-      } else {
-        setPolygonPoints([...polygonPoints, { latitude, longitude }]);
-      }
+  const handleMapPress = (e) => {
+    if (!e || !e.nativeEvent || !e.nativeEvent.coordinate) return;
+    const { latitude, longitude } = e.nativeEvent.coordinate;
+    if (boundaryMode === 'radius') {
+      setShopLocation({ latitude, longitude });
+      fitCircleInView(latitude, longitude, radiusKm);
+      setTimeout(() => {
+        Toast.show({ type: 'success', text1: t('storefrontPinSet'), text2: t('storefrontPinSetSub') });
+      }, 0);
     } else {
-      console.warn('Could not extract coordinates from event', event);
+      const nextPoints = [...polygonPoints, { latitude, longitude }];
+      setPolygonPoints(nextPoints);
+      setTimeout(() => {
+        Toast.show({ type: 'success', text1: t('pointAdded'), text2: `Added vertex #${nextPoints.length} on the map.` });
+      }, 0);
     }
   };
 
@@ -340,100 +481,58 @@ export const RegisterShopScreen = () => {
     setPolygonPoints([]);
   };
 
-  const getZoomForRadius = (km) => {
-    if (km <= 1) return 14.2;
-    if (km <= 2) return 13.2;
-    if (km <= 3) return 12.6;
-    if (km <= 5) return 11.8;
-    if (km <= 8) return 11.1;
-    if (km <= 10) return 10.8;
-    if (km <= 15) return 10.2;
-    return 9.7;
+  const getAdjustedRadiusCenter = (lat, lng, km) => {
+    if (!lat || !lng) return { latitude: lat, longitude: lng };
+    const latOffset = (km * 0.35) / 111;
+    return { latitude: lat - latOffset, longitude: lng };
+  };
+
+  const fitCircleInView = (lat, lng, km) => {
+    if (!lat || !lng) return;
+    const delta = Math.max((km * 2.2) / 111, 0.025);
+    const targetRegion = {
+      latitude: lat,
+      longitude: lng,
+      latitudeDelta: delta,
+      longitudeDelta: delta,
+    };
+    setMapRegion(targetRegion);
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(targetRegion, 500);
+    }
   };
 
   const handleRadiusChange = (km) => {
     setRadiusKm(km);
-    if (cameraRef.current && shopLocation.latitude && shopLocation.longitude) {
-      cameraRef.current.flyTo({
-        center: [shopLocation.longitude, shopLocation.latitude],
-        zoom: getZoomForRadius(km),
-        duration: 700,
-      });
+    if (shopLocation.latitude && shopLocation.longitude) {
+      fitCircleInView(shopLocation.latitude, shopLocation.longitude, km);
     }
   };
 
   const handleSaveBoundary = async () => {
-    const finalPoints = boundaryMode === 'radius' 
-      ? getCirclePoints(shopLocation.latitude, shopLocation.longitude, radiusKm) 
-      : polygonPoints;
+    const finalPoints = polygonPoints;
 
     if (boundaryMode === 'polygon' && finalPoints.length < 3) {
       Toast.show({
         type: 'error',
-        text1: 'Save Boundary',
-        text2: 'Please tap at least 3 points on the map to define your boundary.'
+        text1: t('saveBoundaryTitle'),
+        text2: t('saveBoundaryTapPoints')
       });
       return;
     }
     try {
-      await updateMockShopGeofence(finalPoints);
-      Toast.show({
-        type: 'success',
-        text1: 'Boundary Saved',
-        text2: boundaryMode === 'radius'
-          ? `Delivery boundary saved with a ${radiusKm}km radius.`
-          : `${finalPoints.length} vertices successfully recorded.`
-      });
+      // Nothing to persist yet: the shop does not exist until step 4, and
+      // handleFinishSetup() sends this boundary to /owner/shop/delivery-zone
+      // once it does. This used to write to a mock store nothing ever read.
       setIsFullScreen(false);
       setCurrentStep(4);
     } catch (e) {
       console.error(e);
       Toast.show({
         type: 'error',
-        text1: 'Save Boundary Failed',
-        text2: 'Could not save the delivery boundary.'
+        text1: t('saveBoundaryFailed'),
+        text2: t('couldNotSaveBoundary')
       });
-    }
-  };
-
-  const handleFinishSetup = async () => {
-    setSubmitting(true);
-    const finalPoints = boundaryMode === 'radius' 
-      ? getCirclePoints(shopLocation.latitude, shopLocation.longitude, radiusKm) 
-      : polygonPoints;
-
-    const shopLat = shopLocation.latitude;
-    const shopLng = shopLocation.longitude;
-
-    try {
-      await registerShop({
-        name: ownerName.trim(),
-        phone,
-        email: ownerEmail.trim(),
-        shopName: shopName.trim(),
-        shopPhone: shopPhone.trim(),
-        shopAddress: shopAddress.trim(),
-        shopCategory,
-        shopLatitude: shopLat,
-        shopLongitude: shopLng,
-        shopBannerUrl: bannerUri,
-        deliveryPolygon: finalPoints,
-      });
-
-      Toast.show({
-        type: 'success',
-        text1: 'Merchant Setup Completed',
-        text2: 'Welcome! Your store is now active.'
-      });
-    } catch (e) {
-      console.error(e);
-      Toast.show({
-        type: 'error',
-        text1: 'Registration Failed',
-        text2: 'Could not write owner profile.'
-      });
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -442,16 +541,15 @@ export const RegisterShopScreen = () => {
   const renderStepIndicator = () => {
     if (isFullScreen && currentStep === 3) return null;
     return (
-      <View style={[styles.indicatorContainer, { paddingTop: insets.top + 6 }]}>
+      <View style={[styles.indicatorContainer, { paddingTop: Platform.OS === 'ios' ? insets.top + 16 : Math.max(insets.top, StatusBar.currentHeight || 24) + 12 }]}>
         <View style={styles.indicatorHeader}>
-          {currentStep > 1 ? (
-            <TouchableOpacity onPress={handlePrevStep} style={styles.backBtn}>
-              <ArrowLeft color={theme.colors.primary} size={24} />
-            </TouchableOpacity>
-          ) : (
-            <View style={{ width: 44 }} />
-          )}
-          <Text style={styles.indicatorText}>Step {currentStep} of 4</Text>
+          <TouchableOpacity
+            onPress={currentStep > 1 ? handlePrevStep : handleExitToLogin}
+            style={styles.backBtn}
+          >
+            <ArrowLeft color={theme.colors.primary} size={24} />
+          </TouchableOpacity>
+          <Text style={styles.indicatorText}>{t('stepCount', 'Step {step} of 4').replace('{step}', currentStep)}</Text>
           <View style={{ width: 44 }} />
         </View>
         <View style={styles.progressBarBg}>
@@ -466,7 +564,8 @@ export const RegisterShopScreen = () => {
       case 1:
         return (
           <KeyboardAwareScrollView 
-            contentContainerStyle={styles.scrollContent}
+            ref={form.scrollRef}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: Platform.OS === 'android' ? 90 : Math.max(insets.bottom + 32, 48) }]}
             enableOnAndroid={true}
             enableAutomaticScroll={true}
             keyboardShouldPersistTaps="handled"
@@ -474,25 +573,29 @@ export const RegisterShopScreen = () => {
             extraHeight={120}
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.sectionHeading}>Tell us about yourself</Text>
-            <Text style={styles.sectionSubtitle}>These details are used to set up your partner account.</Text>
+            <Text style={styles.sectionHeading}>{t('tellUsAboutYourself', 'Tell us about yourself')}</Text>
+            <Text style={styles.sectionSubtitle}>{t('personalDetailsSub', 'These details are used to set up your partner account.')}</Text>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Full Name *</Text>
-              <View style={styles.textInputContainer}>
-                <User color={theme.colors.primary} size={22} style={styles.inputIcon} />
+              <Text style={styles.inputLabel}>{t('fullName', 'Full Name *')}</Text>
+              <View style={[styles.textInputContainer, errors.ownerName && styles.textInputContainerError]} onLayout={form.onFieldLayout('ownerName')}>
+                <User color={errors.ownerName ? '#DC2626' : theme.colors.primary} size={22} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="e.g. Aman Sharma"
+                  placeholder={t('fullNamePlaceholder', 'e.g. Aman Sharma')}
                   placeholderTextColor={theme.colors.textLight}
                   value={ownerName}
-                  onChangeText={setOwnerName}
+                  onChangeText={(val) => {
+                    setOwnerName(val);
+                    clearError('ownerName');
+                  }}
                 />
               </View>
+              {errors.ownerName && <Text style={styles.errorText}>{errors.ownerName}</Text>}
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Mobile Number (Verified)</Text>
+              <Text style={styles.inputLabel}>{t('mobileVerified', 'Mobile Number (Verified)')}</Text>
               <View style={[styles.textInputContainer, styles.disabledInput]}>
                 <Phone color={theme.colors.textLight} size={22} style={styles.inputIcon} />
                 <TextInput
@@ -504,22 +607,52 @@ export const RegisterShopScreen = () => {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email Address (Optional)</Text>
-              <View style={styles.textInputContainer}>
-                <Mail color={theme.colors.primary} size={22} style={styles.inputIcon} />
+              <Text style={styles.inputLabel}>{t('emailOptional', 'Email Address (Optional)')}</Text>
+              <View style={[styles.textInputContainer, errors.ownerEmail && styles.textInputContainerError]} onLayout={form.onFieldLayout('ownerEmail')}>
+                <Mail color={errors.ownerEmail ? '#DC2626' : theme.colors.primary} size={22} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="e.g. name@email.com"
+                  placeholder={t('emailPlaceholder', 'e.g. shop@example.com')}
                   placeholderTextColor={theme.colors.textLight}
                   keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
                   value={ownerEmail}
-                  onChangeText={setOwnerEmail}
+                  onChangeText={(val) => {
+                    setOwnerEmail(val);
+                    if (errors.ownerEmail) {
+                      if (!val.trim() || isValidEmail(val)) {
+                        clearError('ownerEmail');
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    if (ownerEmail.trim() && !isValidEmail(ownerEmail)) {
+                      setErrors(prev => ({ ...prev, ownerEmail: 'Please enter a valid email address (e.g. name@domain.com)' }));
+                    }
+                  }}
                 />
               </View>
+              {errors.ownerEmail && (
+                <Text style={styles.errorText}>{errors.ownerEmail}</Text>
+              )}
             </View>
 
             <TouchableOpacity style={styles.primaryBtn} onPress={handleNextStep}>
-              <Text style={styles.primaryBtnText}>Continue to Shop Details</Text>
+              <Text style={styles.primaryBtnText}>{t('continueToShopDetails', 'Continue to Shop Details')}</Text>
+            </TouchableOpacity>
+
+            {/* The arrow in the header does the same thing, but it reads as
+                "previous step" on every other screen — this spells the exit out. */}
+            <TouchableOpacity
+              style={[styles.switchAccountRow, { marginBottom: Platform.OS === 'android' ? 64 : Math.max(insets.bottom + 16, 28) }]}
+              onPress={handleExitToLogin}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.switchAccountText}>
+                {t('wrongNumberPrompt', 'Wrong number?')}{' '}
+                <Text style={styles.switchAccountLink}>{t('signInDifferent', 'Sign in with a different one')}</Text>
+              </Text>
             </TouchableOpacity>
           </KeyboardAwareScrollView>
         );
@@ -527,7 +660,8 @@ export const RegisterShopScreen = () => {
       case 2:
         return (
           <KeyboardAwareScrollView 
-            contentContainerStyle={styles.scrollContent}
+            ref={form.scrollRef}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: Platform.OS === 'android' ? 90 : Math.max(insets.bottom + 32, 48) }]}
             enableOnAndroid={true}
             enableAutomaticScroll={true}
             keyboardShouldPersistTaps="handled"
@@ -535,94 +669,223 @@ export const RegisterShopScreen = () => {
             extraHeight={120}
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.sectionHeading}>Your Shop Details</Text>
-            <Text style={styles.sectionSubtitle}>Enter details of your local store storefront.</Text>
+            <Text style={styles.sectionHeading}>{t('yourShopDetails', 'Your Shop Details')}</Text>
+            <Text style={styles.sectionSubtitle}>{t('shopDetailsSub', 'Enter details of your local store storefront.')}</Text>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Shop Name *</Text>
-              <View style={styles.textInputContainer}>
-                <Store color={theme.colors.primary} size={22} style={styles.inputIcon} />
+              <Text style={styles.inputLabel}>{t('shopNameLabel', 'Shop Name *')}</Text>
+              <View style={[styles.textInputContainer, errors.shopName && styles.textInputContainerError]} onLayout={form.onFieldLayout('shopName')}>
+                <Store color={errors.shopName ? '#DC2626' : theme.colors.primary} size={22} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="e.g. Fresh Mart"
+                  placeholder={t('shopNamePlaceholder', 'e.g. Fresh Mart Grocery')}
                   placeholderTextColor={theme.colors.textLight}
                   value={shopName}
-                  onChangeText={setShopName}
+                  onChangeText={(val) => {
+                    setShopName(val);
+                    clearError('shopName');
+                  }}
                 />
               </View>
+              {errors.shopName && <Text style={styles.errorText}>{errors.shopName}</Text>}
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Shop Category *</Text>
+              <Text style={styles.inputLabel}>{t('shopCategoriesLabel', 'Shop Categories (Select one or more) *')}</Text>
+
+              {selectedCategories.length > 0 && (
+                <View style={styles.selectedCategoryChipsRow}>
+                  {selectedCategories.map((cat) => (
+                    <TouchableOpacity
+                      key={cat.id}
+                      style={styles.selectedCategoryChip}
+                      onPress={() => toggleShopCategory(cat.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.selectedCategoryChipText}>{cat.name}</Text>
+                      <X color={theme.colors.primary} size={14} style={{ marginLeft: 4 }} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {categoriesError && (
+                <TouchableOpacity style={styles.categoryRetryRow} onPress={loadCategories} activeOpacity={0.7}>
+                  <Text style={styles.categoryRetryText}>{categoriesError} Tap to retry.</Text>
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity
-                style={styles.textInputContainer}
+                style={[
+                  styles.textInputContainer, 
+                  isCategoryOpen && styles.textInputContainerFocused,
+                  errors.shopCategory && styles.textInputContainerError
+                ]}
+                onLayout={form.onFieldLayout('shopCategory')}
                 activeOpacity={0.8}
-                onPress={() => setCategoryModalVisible(true)}
+                onPress={() => {
+                  setIsCategoryOpen(!isCategoryOpen);
+                  if (isCategoryOpen) setCategorySearchQuery('');
+                  clearError('shopCategory');
+                }}
               >
-                {(() => {
-                  const selectedObj = CATEGORY_ITEMS.find(item => item.name === shopCategory);
-                  const IconComp = selectedObj ? selectedObj.icon : Tag;
-                  return <IconComp color={theme.colors.primary} size={22} style={styles.inputIcon} />;
-                })()}
-                <Text style={[styles.textInput, !shopCategory && { color: theme.colors.textLight }]}>
-                  {shopCategory || 'Select Category'}
+                <Tag color={errors.shopCategory ? '#DC2626' : theme.colors.primary} size={22} style={styles.inputIcon} />
+                <Text style={[styles.textInput, shopCategoryIds.length === 0 && { color: theme.colors.textLight }]}>
+                  {shopCategoryIds.length === 0
+                    ? t('selectCategoriesPlaceholder', 'Select Categories')
+                    : shopCategoryIds.length === 1
+                      ? t('categorySelectedSingle', '1 Selected Category')
+                      : t('categoriesSelectedPlural', '{count} Selected Categories').replace('{count}', shopCategoryIds.length)}
                 </Text>
-                <ChevronDown color={theme.colors.textLight} size={22} style={{ marginRight: 16 }} />
+                {isCategoryOpen ? (
+                  <ChevronUp color={theme.colors.primary} size={22} style={{ marginRight: 16 }} />
+                ) : (
+                  <ChevronDown color={theme.colors.textDark} size={22} style={{ marginRight: 16 }} />
+                )}
               </TouchableOpacity>
+              {errors.shopCategory && <Text style={styles.errorText}>{errors.shopCategory}</Text>}
+
+              {isCategoryOpen && (
+                <View style={styles.inlineCategoryDropdown}>
+                  <View style={styles.categorySearchContainer}>
+                    <Search color={theme.colors.primary} size={18} style={styles.categorySearchIcon} />
+                    <TextInput
+                      style={styles.categorySearchInput}
+                      placeholder={t('searchCategoriesPlaceholder', 'Search categories...')}
+                      placeholderTextColor={theme.colors.textLight}
+                      value={categorySearchQuery}
+                      onChangeText={setCategorySearchQuery}
+                      autoFocus={true}
+                    />
+                    {categorySearchQuery.length > 0 && (
+                      <TouchableOpacity onPress={() => setCategorySearchQuery('')}>
+                        <X color={theme.colors.textLight} size={18} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  <ScrollView 
+                    nestedScrollEnabled={true} 
+                    style={styles.categoryDropdownScroll}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {categoriesLoading ? (
+                      <View style={styles.noCategoryContainer}>
+                        <ActivityIndicator color={theme.colors.primary} size="small" />
+                      </View>
+                    ) : filteredCategories.length > 0 ? (
+                      filteredCategories.map((cat) => {
+                        const CatIcon = getCategoryIcon(cat.name);
+                        const isSelected = shopCategoryIds.includes(cat.id);
+                        const catColors = getCategoryColor(cat.name);
+                        return (
+                          <TouchableOpacity
+                            key={cat.id}
+                            style={[
+                              styles.categoryDropdownItem,
+                              isSelected && { backgroundColor: '#DCFCE7' }
+                            ]}
+                            onPress={() => toggleShopCategory(cat.id)}
+                          >
+                            <View style={[styles.categoryDropdownItemLeft]}>
+                              <View style={[styles.categoryIconBadge, { backgroundColor: catColors.bg }]}>
+                                <CatIcon color={catColors.text} size={18} />
+                              </View>
+                              <Text style={[styles.categoryDropdownItemText, isSelected && styles.categoryDropdownItemTextSelected]}>
+                                {cat.name}
+                              </Text>
+                            </View>
+                            {isSelected ? (
+                              <Check color={theme.colors.primary} size={18} strokeWidth={3} />
+                            ) : (
+                              <View style={styles.unselectedCheckbox} />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })
+                    ) : (
+                      <View style={styles.noCategoryContainer}>
+                        <Text style={styles.noCategoryText}>
+                          {categorySearchQuery
+                            ? `No category found matching "${categorySearchQuery}"`
+                            : categoriesError || 'No categories available yet.'}
+                        </Text>
+                      </View>
+                    )}
+                  </ScrollView>
+                  <TouchableOpacity
+                    style={styles.categoryDropdownDoneBtn}
+                    onPress={() => {
+                      setIsCategoryOpen(false);
+                      setCategorySearchQuery('');
+                    }}
+                  >
+                    <Text style={styles.categoryDropdownDoneText}>Done ({shopCategoryIds.length} selected)</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Shop Contact Number *</Text>
-              <View style={styles.textInputContainer}>
-                <Phone color={theme.colors.primary} size={22} style={styles.inputIcon} />
+              <Text style={styles.inputLabel}>{t('shopContactLabel', 'Shop Contact Number *')}</Text>
+              <View style={[styles.textInputContainer, errors.shopPhone && styles.textInputContainerError]} onLayout={form.onFieldLayout('shopPhone')}>
+                <Phone color={errors.shopPhone ? '#DC2626' : theme.colors.primary} size={22} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="e.g. 9876543210"
+                  placeholder={t('shopContactPlaceholder', '10-digit customer helpline number')}
                   placeholderTextColor={theme.colors.textLight}
                   keyboardType="phone-pad"
-                  maxLength={15}
+                  maxLength={10}
                   value={shopPhone}
-                  onChangeText={setShopPhone}
+                  onChangeText={(val) => {
+                    setShopPhone(val);
+                    clearError('shopPhone');
+                  }}
                 />
               </View>
+              {errors.shopPhone && <Text style={styles.errorText}>{errors.shopPhone}</Text>}
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Shop Address *</Text>
-              <View style={[styles.textInputContainer, styles.textAreaContainer]}>
-                <MapPin color={theme.colors.primary} size={22} style={[styles.inputIcon, { marginTop: 14 }]} />
+              <Text style={styles.inputLabel}>{t('shopAddressLabel', 'Shop Address *')}</Text>
+              <View style={[styles.textInputContainer, styles.textAreaContainer, errors.shopAddress && styles.textInputContainerError]} onLayout={form.onFieldLayout('shopAddress')}>
+                <MapPin color={errors.shopAddress ? '#DC2626' : theme.colors.primary} size={22} style={[styles.inputIcon, { marginTop: 14 }]} />
                 <TextInput
                   style={[styles.textInput, styles.textArea]}
-                  placeholder="Street details, neighborhood pincode"
+                  placeholder={t('shopAddressPlaceholder', 'Street details, neighborhood pincode')}
                   placeholderTextColor={theme.colors.textLight}
                   value={shopAddress}
-                  onChangeText={setShopAddress}
+                  onChangeText={(val) => {
+                    setShopAddress(val);
+                    clearError('shopAddress');
+                  }}
                   multiline={true}
                   numberOfLines={3}
                   textAlignVertical="top"
                 />
               </View>
+              {errors.shopAddress && <Text style={styles.errorText}>{errors.shopAddress}</Text>}
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Storefront Banner Photo</Text>
+              <Text style={styles.inputLabel}>{t('storefrontBannerPhoto', 'Storefront Banner Photo')}</Text>
               {bannerUri ? (
                 <View style={styles.imagePreviewContainer}>
                   <Image source={{ uri: bannerUri }} style={styles.imagePreview} />
                   <TouchableOpacity style={styles.replaceImageBtn} onPress={selectBannerImage}>
-                    <Text style={styles.replaceImageText}>Change Image</Text>
+                    <Text style={styles.replaceImageText}>{t('changeImage', 'Change Image')}</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
                 <TouchableOpacity style={styles.imagePlaceholder} onPress={selectBannerImage}>
                   <ImageIcon color={theme.colors.primary} size={36} />
-                  <Text style={styles.imagePlaceholderText}>Select Banner Photo from Gallery</Text>
+                  <Text style={styles.imagePlaceholderText}>{t('selectBannerFromGallery', 'Select Banner Photo from Gallery')}</Text>
                 </TouchableOpacity>
               )}
             </View>
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleNextStep}>
-              <Text style={styles.primaryBtnText}>Continue to Geofencing</Text>
+            <TouchableOpacity style={[styles.primaryBtn, { marginBottom: Platform.OS === 'android' ? 64 : Math.max(insets.bottom + 16, 28) }]} onPress={handleNextStep}>
+              <Text style={styles.primaryBtnText}>{t('continueToGeofencing', 'Continue to Geofencing')}</Text>
             </TouchableOpacity>
           </KeyboardAwareScrollView>
         );
@@ -633,33 +896,27 @@ export const RegisterShopScreen = () => {
         const canSave = boundaryMode === 'radius' ? true : validShape;
         return (
           <View style={styles.mapContainer}>
-            {/* Top Address & Mode Selection Panel */}
+            {/* Top Mode Selection Panel */}
             {!isFullScreen && (
               <View style={styles.mapTopPanel}>
-                <View style={styles.addressCard}>
-                  <MapPin color={theme.colors.primary} size={18} style={{ marginRight: 6 }} />
-                  <Text style={styles.addressText} numberOfLines={2}>
-                    {shopAddress || 'No shop address entered.'}
-                  </Text>
-                </View>
-
                 <View style={styles.modeToggleRow}>
                   <TouchableOpacity
                     style={[styles.modeToggleBtn, boundaryMode === 'polygon' && styles.modeToggleBtnActive]}
                     onPress={() => {
                       setBoundaryMode('polygon');
-                      setMapTapAction('boundary'); // default to drawing
-                      if (cameraRef.current && shopLocation.latitude && shopLocation.longitude) {
-                        cameraRef.current.flyTo({
-                          center: [shopLocation.longitude, shopLocation.latitude],
-                          zoom: 15,
-                          duration: 700,
-                        });
+                      setMapTapAction('boundary');
+                      if (mapRef.current && shopLocation.latitude && shopLocation.longitude) {
+                        mapRef.current.animateToRegion({
+                          latitude: shopLocation.latitude,
+                          longitude: shopLocation.longitude,
+                          latitudeDelta: 0.015,
+                          longitudeDelta: 0.015,
+                        }, 600);
                       }
                     }}
                   >
                     <Text style={[styles.modeToggleBtnText, boundaryMode === 'polygon' && styles.modeToggleBtnTextActive]}>
-                      Custom Shape
+                      {t('customShape', 'Custom Shape')}
                     </Text>
                   </TouchableOpacity>
 
@@ -667,18 +924,14 @@ export const RegisterShopScreen = () => {
                     style={[styles.modeToggleBtn, boundaryMode === 'radius' && styles.modeToggleBtnActive]}
                     onPress={() => {
                       setBoundaryMode('radius');
-                      setMapTapAction('storefront'); // can only place storefront pin
-                      if (cameraRef.current && shopLocation.latitude && shopLocation.longitude) {
-                        cameraRef.current.flyTo({
-                          center: [shopLocation.longitude, shopLocation.latitude],
-                          zoom: getZoomForRadius(radiusKm),
-                          duration: 700,
-                        });
+                      setMapTapAction('storefront');
+                      if (shopLocation.latitude && shopLocation.longitude) {
+                        fitCircleInView(shopLocation.latitude, shopLocation.longitude, radiusKm);
                       }
                     }}
                   >
                     <Text style={[styles.modeToggleBtnText, boundaryMode === 'radius' && styles.modeToggleBtnTextActive]}>
-                      Radius Circle
+                      {t('radiusCircle', 'Radius Circle')}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -691,10 +944,8 @@ export const RegisterShopScreen = () => {
                 <Map color="#FFF" size={18} style={{ marginRight: 8 }} />
                 <Text style={styles.mapInstructionText}>
                   {boundaryMode === 'radius'
-                    ? 'Tap map to set storefront pin. Adjust circle radius below.'
-                    : mapTapAction === 'storefront'
-                      ? 'Tap map to set storefront pin. Toggle to "Draw Boundary" to trace.'
-                      : 'Tap map to draw delivery boundary (at least 3 points).'}
+                    ? t('mapRadiusInstruction', '📍 Tap map to set shop pin & radius circle.')
+                    : t('mapDrawInstruction', '✏️ Tap map to draw delivery boundary (at least 3 points).')}
                 </Text>
               </View>
             )}
@@ -702,172 +953,158 @@ export const RegisterShopScreen = () => {
             {loadingLocation ? (
               <View style={styles.mapLoader}>
                 <ActivityIndicator size="large" color={theme.colors.primary} />
-                <Text style={styles.mapLoaderText}>Locating storefront...</Text>
+                <Text style={styles.mapLoaderText}>{t('locatingStorefront')}</Text>
               </View>
             ) : (
               <View style={{ flex: 1, position: 'relative' }}>
-                <MapLibreMap
+                <MapView
+                  ref={mapRef}
                   style={styles.mapView}
-                  mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
-                logoEnabled={false}
-                attributionEnabled={false}
-                androidView="surface"
-                onPress={handleMapPress}
-              >
-                <Camera
-                  ref={cameraRef}
-                  initialViewState={{
-                    center: [mapRegion.longitude, mapRegion.latitude],
-                    zoom: 15,
-                  }}
-                />
-                <UserLocation visible={true} />
-
-                {/* Storefront Location Marker */}
-                {shopLocation.latitude && shopLocation.longitude && (
-                  <Marker
-                    id="storefront-pin"
-                    lngLat={[shopLocation.longitude, shopLocation.latitude]}
-                  >
-                    <View style={styles.storefrontMarkerContainer}>
-                      <View style={styles.storefrontMarkerBubble}>
-                        <Store color="#FFF" size={14} />
+                  provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+                  region={mapRegion}
+                  onPress={handleMapPress}
+                  showsUserLocation={true}
+                  showsMyLocationButton={false}
+                >
+                  {/* Storefront Marker (Shown only in Radius Circle mode) */}
+                  {boundaryMode === 'radius' && shopLocation.latitude && shopLocation.longitude && (
+                    <Marker
+                      coordinate={{ latitude: shopLocation.latitude, longitude: shopLocation.longitude }}
+                      draggable
+                      onDragEnd={(e) => {
+                        if (e && e.nativeEvent && e.nativeEvent.coordinate) {
+                          const { latitude, longitude } = e.nativeEvent.coordinate;
+                          setShopLocation({ latitude, longitude });
+                          fitCircleInView(latitude, longitude, radiusKm);
+                        }
+                      }}
+                      anchor={{ x: 0.5, y: 1.0 }}
+                    >
+                      <View style={styles.storefrontMarkerContainer}>
+                        <View style={styles.storefrontMarkerBubble}>
+                          <Store color="#FFF" size={14} />
+                        </View>
+                        <View style={styles.storefrontMarkerTail} />
                       </View>
-                      <View style={styles.storefrontMarkerTail} />
-                    </View>
-                  </Marker>
-                )}
+                    </Marker>
+                  )}
 
-                {/* Drawn Points Markers */}
-                {boundaryMode === 'polygon' && polygonPoints.map((point, index) => (
-                  <Marker
-                    key={index.toString()}
-                    id={`vertex-${index}`}
-                    lngLat={[point.longitude, point.latitude]}
-                  >
-                    <View style={styles.markerContainer}>
-                      <View style={styles.markerDot}>
-                        <Text style={styles.markerText}>{index + 1}</Text>
+                  {/* Custom Shape Polygon Vertices */}
+                  {(boundaryMode === 'polygon' || boundaryMode === 'custom') && polygonPoints.map((point, index) => (
+                    <Marker
+                      key={`vertex-${index}-${point.latitude}-${point.longitude}`}
+                      coordinate={{ latitude: point.latitude, longitude: point.longitude }}
+                      draggable
+                      onDragEnd={(e) => {
+                        if (e && e.nativeEvent && e.nativeEvent.coordinate) {
+                          const { latitude, longitude } = e.nativeEvent.coordinate;
+                          setPolygonPoints(prev => {
+                            const updated = [...prev];
+                            updated[index] = { latitude, longitude };
+                            return updated;
+                          });
+                        }
+                      }}
+                      anchor={{ x: 0.5, y: 0.5 }}
+                    >
+                      <View style={styles.markerContainer}>
+                        <View style={styles.markerDot}>
+                          <Text style={styles.markerText}>{index + 1}</Text>
+                        </View>
                       </View>
-                    </View>
-                  </Marker>
-                ))}
+                    </Marker>
+                  ))}
 
-                {/* Live Connected Line */}
-                {boundaryMode === 'polygon' && lineGeoJson && (
-                  <GeoJSONSource id="lineSource" data={lineGeoJson}>
-                    <Layer
-                      id="lineLayer"
-                      type="line"
-                      style={{
-                        lineColor: theme.colors.primary,
-                        lineWidth: 4,
-                      }}
+                  {/* Custom Polygon */}
+                  {(boundaryMode === 'polygon' || boundaryMode === 'custom') && polygonPoints.length > 0 && (
+                    <Polygon
+                      coordinates={polygonPoints}
+                      strokeColor={theme.colors.primary}
+                      strokeWidth={3}
+                      fillColor="rgba(46, 125, 50, 0.25)"
+                      tappable={true}
+                      onPress={handleMapPress}
                     />
-                  </GeoJSONSource>
+                  )}
+
+                  {/* Radius Circle */}
+                  {boundaryMode === 'radius' && shopLocation.latitude && shopLocation.longitude && (
+                    <Circle
+                      center={{ latitude: shopLocation.latitude, longitude: shopLocation.longitude }}
+                      radius={radiusKm * 1000}
+                      strokeColor="#2196F3"
+                      strokeWidth={3}
+                      fillColor="rgba(33, 150, 243, 0.25)"
+                      tappable={true}
+                      onPress={handleMapPress}
+                    />
+                  )}
+                </MapView>
+
+              {/* Floating Buttons: Fit Circle & Full Screen */}
+              <View style={[
+                styles.mapTopFloatingContainer,
+                { top: isFullScreen ? (Platform.OS === 'ios' ? insets.top + 12 : 24) : 14 }
+              ]}>
+                <TouchableOpacity
+                  style={styles.fitCircleToggleBtn}
+                  activeOpacity={0.85}
+                  onPress={handleRecenterGPS}
+                >
+                  <Compass color="#16A34A" size={15} style={{ marginRight: 6 }} />
+                  <Text style={styles.fitCircleToggleText}>{t('myLocation')}</Text>
+                </TouchableOpacity>
+
+                {boundaryMode === 'radius' && (
+                  <TouchableOpacity
+                    style={styles.fitCircleToggleBtn}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      if (shopLocation.latitude && shopLocation.longitude) {
+                        fitCircleInView(shopLocation.latitude, shopLocation.longitude, radiusKm);
+                      }
+                    }}
+                  >
+                    <Maximize2 color="#16A34A" size={15} style={{ marginRight: 6 }} />
+                    <Text style={styles.fitCircleToggleText}>{t('fitCircle')}</Text>
+                  </TouchableOpacity>
                 )}
 
-                {/* Final Polygon Zone */}
-                {boundaryMode === 'polygon' && polygonGeoJson && (
-                  <GeoJSONSource id="polygonSource" data={polygonGeoJson}>
-                    <Layer
-                      id="polygonFillLayer"
-                      type="fill"
-                      style={{
-                        fillColor: 'rgba(46, 125, 50, 0.25)',
-                      }}
-                    />
-                    <Layer
-                      id="polygonOutlineLayer"
-                      type="line"
-                      style={{
-                        lineColor: theme.colors.primary,
-                        lineWidth: 4,
-                      }}
-                    />
-                  </GeoJSONSource>
-                )}
-
-                {/* Radius Circle Zone */}
-                {boundaryMode === 'radius' && radiusCircleGeoJson && (
-                  <GeoJSONSource id="radiusCircleSource" data={radiusCircleGeoJson}>
-                    <Layer
-                      id="radiusCircleFillLayer"
-                      type="fill"
-                      style={{
-                        fillColor: 'rgba(33, 150, 243, 0.2)',
-                      }}
-                    />
-                    <Layer
-                      id="radiusCircleOutlineLayer"
-                      type="line"
-                      style={{
-                        lineColor: '#2196F3',
-                        lineWidth: 3,
-                      }}
-                    />
-                  </GeoJSONSource>
-                )}
-              </MapLibreMap>
-
-              {/* Floating Full Screen Button */}
-              <TouchableOpacity
-                style={[
-                  styles.fullScreenToggleBtn,
-                  { top: isFullScreen ? (Platform.OS === 'ios' ? insets.top + 12 : 24) : 14 }
-                ]}
-                activeOpacity={0.85}
-                onPress={() => setIsFullScreen(!isFullScreen)}
-              >
-                {isFullScreen ? (
-                  <>
-                    <Minimize2 color="#FFF" size={16} style={{ marginRight: 6 }} />
-                    <Text style={styles.fullScreenToggleText}>Exit Full Screen</Text>
-                  </>
-                ) : (
-                  <>
-                    <Maximize2 color="#FFF" size={16} style={{ marginRight: 6 }} />
-                    <Text style={styles.fullScreenToggleText}>Full Screen</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.fullScreenToggleBtn}
+                  activeOpacity={0.85}
+                  onPress={() => setIsFullScreen(!isFullScreen)}
+                >
+                  {isFullScreen ? (
+                    <>
+                      <Minimize2 color="#FFF" size={15} style={{ marginRight: 6 }} />
+                      <Text style={styles.fullScreenToggleText}>{t('exitFullScreen', 'Exit Full Screen')}</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 color="#FFF" size={15} style={{ marginRight: 6 }} />
+                      <Text style={styles.fullScreenToggleText}>{t('fullScreen', 'Full Screen')}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
             )}
 
             {/* Map Action Buttons Overlay */}
-            <View style={[styles.mapButtonOverlay, { bottom: insets.bottom > 0 ? insets.bottom + 10 : 20 }]}>
-              {/* Tap Action Toggle (only for Custom Shape mode) */}
-              {boundaryMode === 'polygon' && (
-                <View style={styles.tapActionToggleRow}>
-                  <TouchableOpacity
-                    style={[styles.tapActionBtn, mapTapAction === 'storefront' && styles.tapActionBtnActive]}
-                    onPress={() => setMapTapAction('storefront')}
-                  >
-                    <Store color={mapTapAction === 'storefront' ? '#FFF' : theme.colors.primary} size={15} style={{ marginRight: 6 }} />
-                    <Text style={[styles.tapActionBtnText, mapTapAction === 'storefront' && styles.tapActionBtnTextActive]}>
-                      Set Shop Pin
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.tapActionBtn, mapTapAction === 'boundary' && styles.tapActionBtnActive]}
-                    onPress={() => setMapTapAction('boundary')}
-                  >
-                    <Map color={mapTapAction === 'boundary' ? '#FFF' : theme.colors.primary} size={15} style={{ marginRight: 6 }} />
-                    <Text style={[styles.tapActionBtnText, mapTapAction === 'boundary' && styles.tapActionBtnTextActive]}>
-                      Draw Boundary
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+            <View style={[styles.mapButtonOverlay, { bottom: Platform.OS === 'android' ? 64 : Math.max(insets.bottom + 16, 28) }]}>
 
               {/* Radius size control */}
               {boundaryMode === 'radius' && (
                 <View style={styles.radiusControlCard}>
                   <Text style={styles.radiusControlLabel}>
-                    Delivery Radius: <Text style={styles.radiusHighlight}>{radiusKm} km</Text>
+                    {t('deliveryRadiusLabel')} <Text style={styles.radiusHighlight}>{radiusKm} km</Text>
                   </Text>
-                  <View style={styles.radiusChipsRow}>
+                  <ScrollView 
+                    horizontal={true} 
+                    showsHorizontalScrollIndicator={false} 
+                    contentContainerStyle={styles.radiusChipsRowHorizontal}
+                  >
                     {[1, 2, 3, 5, 8, 10, 15, 20].map((km) => (
                       <TouchableOpacity
                         key={km}
@@ -879,7 +1116,7 @@ export const RegisterShopScreen = () => {
                         </Text>
                       </TouchableOpacity>
                     ))}
-                  </View>
+                  </ScrollView>
                 </View>
               )}
 
@@ -890,8 +1127,8 @@ export const RegisterShopScreen = () => {
                     onPress={undoLastPoint}
                     disabled={!hasPoints}
                   >
-                    <Undo color={hasPoints ? theme.colors.primary : '#AAA'} size={20} />
-                    <Text style={[styles.mapOverlayBtnText, { color: hasPoints ? theme.colors.textDark : '#AAA' }]}>Undo</Text>
+                    <Undo color={hasPoints ? theme.colors.primary : '#AAA'} size={16} />
+                    <Text style={[styles.mapOverlayBtnText, { color: hasPoints ? theme.colors.textDark : '#AAA' }]}>{t('undoBtn', 'Undo')}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity 
@@ -899,8 +1136,8 @@ export const RegisterShopScreen = () => {
                     onPress={clearPolygon}
                     disabled={!hasPoints}
                   >
-                    <Trash2 color={hasPoints ? theme.colors.error : '#AAA'} size={20} />
-                    <Text style={[styles.mapOverlayBtnText, { color: hasPoints ? theme.colors.error : '#AAA' }]}>Reset</Text>
+                    <Trash2 color={hasPoints ? theme.colors.error : '#AAA'} size={16} />
+                    <Text style={[styles.mapOverlayBtnText, { color: hasPoints ? theme.colors.error : '#AAA' }]}>{t('resetBtn', 'Reset')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -913,8 +1150,8 @@ export const RegisterShopScreen = () => {
                 <Save color="#FFF" size={20} style={{ marginRight: 8 }} />
                 <Text style={styles.mapSaveBtnText}>
                   {boundaryMode === 'radius'
-                    ? `Save boundary (${radiusKm}km radius)`
-                    : `Save boundary (${polygonPoints.length} points)`}
+                    ? t('saveBoundaryRadius', 'Save boundary ({count}km radius)').replace('{count}', radiusKm)
+                    : t('saveBoundaryPoints', 'Save boundary ({count} points)').replace('{count}', polygonPoints.length)}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -923,13 +1160,20 @@ export const RegisterShopScreen = () => {
 
       case 4:
         return (
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            <Text style={styles.sectionHeading}>Review Setup Details</Text>
-            <Text style={styles.sectionSubtitle}>Please confirm the business profile is correct.</Text>
+          <KeyboardAwareScrollView
+            ref={form.scrollRef}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: Platform.OS === 'android' ? 90 : Math.max(insets.bottom + 36, 52) }]}
+            enableOnAndroid={true}
+            enableAutomaticScroll={true}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.sectionHeading}>{t('confirmSetupHeading', 'Step 4 of 4: Confirm Storefront Setup')}</Text>
+            <Text style={styles.sectionSubtitle}>{t('personalDetailsSub', 'Review your storefront details and delivery boundary before proceeding to document upload.')}</Text>
 
             {/* Overview Card */}
             <View style={styles.confirmCard}>
-              <Text style={styles.confirmSectionTitle}>PERSONAL INFORMATION</Text>
+              <Text style={styles.confirmSectionTitle}>{t('ownerInformationHeader', 'OWNER INFORMATION')}</Text>
               <View style={styles.confirmRow}>
                 <User color={theme.colors.primary} size={18} style={styles.confirmIcon} />
                 <Text style={styles.confirmValue}>{ownerName}</Text>
@@ -947,13 +1191,13 @@ export const RegisterShopScreen = () => {
 
               <View style={styles.confirmDivider} />
 
-              <Text style={styles.confirmSectionTitle}>STOREFRONT INFORMATION</Text>
+              <Text style={styles.confirmSectionTitle}>{t('storefrontInfoHeader', 'STOREFRONT INFORMATION')}</Text>
               {bannerUri && (
                 <Image source={{ uri: bannerUri }} style={styles.confirmBannerThumbnail} />
               )}
               <View style={styles.confirmRow}>
                 <Store color={theme.colors.primary} size={18} style={styles.confirmIcon} />
-                <Text style={styles.confirmValue}>{shopName} ({shopCategory})</Text>
+                <Text style={styles.confirmValue}>{shopName} ({selectedCategories.map((c) => c.name).join(', ')})</Text>
               </View>
               <View style={styles.confirmRow}>
                 <Phone color={theme.colors.primary} size={18} style={styles.confirmIcon} />
@@ -966,29 +1210,104 @@ export const RegisterShopScreen = () => {
 
               <View style={styles.confirmDivider} />
 
-              <Text style={styles.confirmSectionTitle}>DELIVERY SETTINGS</Text>
-              <View style={styles.confirmRow}>
-                <CheckCircle color={theme.colors.primary} size={20} style={styles.confirmIcon} />
-                <Text style={[styles.confirmValue, { fontWeight: '800', color: theme.colors.primary }]}>
-                  {boundaryMode === 'radius'
-                    ? `Circular boundary active (${radiusKm} km radius)`
-                    : `${polygonPoints.length} vertices custom geofence boundary active`}
-                </Text>
+              <Text style={styles.confirmSectionTitle}>{t('deliverySettingsHeader', 'DELIVERY SETTINGS')}</Text>
+
+              {/* Live Map Boundary Preview with pointerEvents="none" so map touch listeners don't block vertical scrolling */}
+              <View style={styles.reviewMapPreviewContainer} pointerEvents="none">
+                <View style={styles.reviewMapBadge}>
+                  <MapPin color={theme.colors.primary} size={14} style={{ marginRight: 4 }} />
+                  <Text style={styles.reviewMapBadgeText}>
+                    {boundaryMode === 'radius' ? t('radiusCircle', 'Radius Circle') : t('customShape', 'Custom Shape')}
+                  </Text>
+                </View>
+                <MapView
+                  style={styles.reviewMapView}
+                  provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+                  region={{
+                    latitude: shopLocation.latitude || 21.1702,
+                    longitude: shopLocation.longitude || 72.8311,
+                    latitudeDelta: boundaryMode === 'radius' ? (radiusKm * 2.6) / 111 : 0.015,
+                    longitudeDelta: boundaryMode === 'radius' ? (radiusKm * 2.6) / (111 * Math.cos((shopLocation.latitude || 21) * Math.PI / 180)) : 0.015,
+                  }}
+                  scrollEnabled={false}
+                  zoomEnabled={false}
+                  pitchEnabled={false}
+                  rotateEnabled={false}
+                >
+                  {shopLocation.latitude && shopLocation.longitude && (
+                    <Marker
+                      coordinate={{ latitude: shopLocation.latitude, longitude: shopLocation.longitude }}
+                      anchor={{ x: 0.5, y: 1.0 }}
+                    >
+                      <View style={styles.storefrontMarkerContainer}>
+                        <View style={styles.storefrontMarkerBubble}>
+                          <Store color="#FFF" size={14} />
+                        </View>
+                        <View style={styles.storefrontMarkerTail} />
+                      </View>
+                    </Marker>
+                  )}
+
+                  {(boundaryMode === 'polygon' || boundaryMode === 'custom') && polygonPoints.map((point, index) => (
+                    <Marker
+                      key={`review-vertex-${index}-${point.latitude}-${point.longitude}`}
+                      coordinate={{ latitude: point.latitude, longitude: point.longitude }}
+                      anchor={{ x: 0.5, y: 0.5 }}
+                    >
+                      <View style={styles.markerContainer}>
+                        <View style={styles.markerDot}>
+                          <Text style={styles.markerText}>{index + 1}</Text>
+                        </View>
+                      </View>
+                    </Marker>
+                  ))}
+
+                  {(boundaryMode === 'polygon' || boundaryMode === 'custom') && polygonPoints.length > 0 && (
+                    <Polygon
+                      coordinates={polygonPoints}
+                      strokeColor={theme.colors.primary}
+                      strokeWidth={3}
+                      fillColor="rgba(46, 125, 50, 0.25)"
+                    />
+                  )}
+
+                  {boundaryMode === 'radius' && shopLocation.latitude && shopLocation.longitude && (
+                    <Circle
+                      center={{ latitude: shopLocation.latitude, longitude: shopLocation.longitude }}
+                      radius={radiusKm * 1000}
+                      strokeColor="#2196F3"
+                      strokeWidth={3}
+                      fillColor="rgba(33, 150, 243, 0.25)"
+                    />
+                  )}
+                </MapView>
               </View>
             </View>
 
             <TouchableOpacity 
-              style={[styles.primaryBtn, submitting && styles.disabledBtn]} 
-              onPress={handleFinishSetup}
-              disabled={submitting}
+              style={[styles.primaryBtn, { marginTop: 24, marginBottom: Platform.OS === 'android' ? 64 : Math.max(insets.bottom + 16, 28) }]} 
+              onPress={() => {
+                const registerFormData = {
+                  name: ownerName.trim(),
+                  phone,
+                  email: ownerEmail.trim(),
+                  shopName: shopName.trim(),
+                  shopPhone: shopPhone.trim(),
+                  shopAddress: shopAddress.trim(),
+                  shopCategory: shopCategoryIds,
+                  shopLatitude: shopLocation.latitude,
+                  shopLongitude: shopLocation.longitude,
+                  shopBannerUrl: bannerUri,
+                  deliveryPolygon: polygonPoints,
+                  deliveryBoundaryType: boundaryMode === 'radius' ? 'radius' : 'custom',
+                  deliveryRadiusKm: radiusKm,
+                };
+                navigation.navigate('DocumentUpload', { registerFormData });
+              }}
             >
-              {submitting ? (
-                <ActivityIndicator color="#FFF" size="small" />
-              ) : (
-                <Text style={styles.primaryBtnText}>Finish Setup & Open Shop</Text>
-              )}
+              <Text style={styles.primaryBtnText}>{t('continueToDocUpload')}</Text>
             </TouchableOpacity>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         );
       default:
         return null;
@@ -1000,52 +1319,7 @@ export const RegisterShopScreen = () => {
       {renderStepIndicator()}
       <View style={styles.body}>{renderStepContent()}</View>
 
-      {/* Category Dropdown Modal */}
-      <Modal
-        visible={categoryModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setCategoryModalVisible(false)}
-      >
-        <TouchableOpacity 
-          style={styles.modalOverlay} 
-          activeOpacity={1} 
-          onPress={() => setCategoryModalVisible(false)}
-        >
-          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Shop Category</Text>
-              <TouchableOpacity onPress={() => setCategoryModalVisible(false)} style={styles.closeBtn}>
-                <X color={theme.colors.textDark} size={22} />
-              </TouchableOpacity>
-            </View>
-            {CATEGORY_ITEMS.map((item) => {
-              const isSelected = shopCategory === item.name;
-              const IconComp = item.icon;
-              return (
-                <TouchableOpacity
-                  key={item.name}
-                  style={[styles.modalItem, isSelected && styles.modalItemSelected]}
-                  onPress={() => {
-                    setShopCategory(item.name);
-                    setCategoryModalVisible(false);
-                  }}
-                >
-                  <View style={styles.modalItemLeft}>
-                    <View style={[styles.categoryModalIcon, isSelected && styles.categoryModalIconSelected]}>
-                      <IconComp color={isSelected ? theme.colors.primary : theme.colors.textDark} size={20} />
-                    </View>
-                    <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelected]}>
-                      {item.name}
-                    </Text>
-                  </View>
-                  {isSelected && <Check color={theme.colors.primary} size={20} strokeWidth={3} />}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </TouchableOpacity>
-      </Modal>
+
     </View>
   );
 };
@@ -1150,6 +1424,7 @@ const styles = StyleSheet.create({
   textArea: {
     height: 90,
     paddingTop: 10,
+    fontSize: 15,
   },
   modalOverlay: {
     flex: 1,
@@ -1275,10 +1550,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: theme.spacing.l,
+    marginBottom: 24,
     ...theme.shadows.soft,
   },
   disabledBtn: {
     opacity: 0.5,
+  },
+  switchAccountRow: {
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  switchAccountText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.textLight,
+    textAlign: 'center',
+  },
+  switchAccountLink: {
+    fontWeight: '800',
+    color: theme.colors.primary,
   },
   primaryBtnText: {
     fontSize: 18,
@@ -1319,9 +1609,35 @@ const styles = StyleSheet.create({
   mapView: {
     flex: 1,
   },
-  fullScreenToggleBtn: {
+  mapTopFloatingContainer: {
     position: 'absolute',
     right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  fitCircleToggleBtn: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    marginRight: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+  },
+  fitCircleToggleText: {
+    color: theme.colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  fullScreenToggleBtn: {
     backgroundColor: theme.colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1333,7 +1649,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
-    zIndex: 20,
   },
   fullScreenToggleText: {
     color: '#FFF',
@@ -1370,9 +1685,9 @@ const styles = StyleSheet.create({
   },
   mapOverlayBtn: {
     flex: 1,
-    height: 52,
+    height: 40,
     backgroundColor: theme.colors.surface,
-    borderRadius: 14,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1382,9 +1697,9 @@ const styles = StyleSheet.create({
     ...theme.shadows.soft,
   },
   mapOverlayBtnText: {
-    fontSize: 15,
-    fontWeight: '800',
-    marginLeft: 6,
+    fontSize: 13.5,
+    fontWeight: '700',
+    marginLeft: 5,
   },
   mapSaveBtn: {
     backgroundColor: theme.colors.primary,
@@ -1423,16 +1738,20 @@ const styles = StyleSheet.create({
   },
   confirmRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 10,
   },
   confirmIcon: {
     marginRight: 10,
+    marginTop: 2,
   },
   confirmValue: {
-    fontSize: 17,
+    flex: 1,
+    flexShrink: 1,
+    fontSize: 15,
     fontWeight: '700',
     color: theme.colors.textDark,
+    lineHeight: 22,
   },
   confirmBannerThumbnail: {
     height: 100,
@@ -1576,19 +1895,18 @@ const styles = StyleSheet.create({
   radiusHighlight: {
     color: theme.colors.primary,
   },
-  radiusChipsRow: {
+  radiusChipsRowHorizontal: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingVertical: 2,
   },
   radiusChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 10,
     borderWidth: 1.5,
     borderColor: theme.colors.border,
-    marginRight: 6,
-    marginBottom: 6,
+    marginRight: 8,
   },
   radiusChipActive: {
     backgroundColor: theme.colors.primary,
@@ -1602,4 +1920,196 @@ const styles = StyleSheet.create({
   radiusChipTextActive: {
     color: 'white',
   },
+  textInputContainerFocused: {
+    borderColor: theme.colors.primary,
+  },
+  inlineCategoryDropdown: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary,
+    marginTop: 8,
+    maxHeight: 260,
+    overflow: 'hidden',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  categorySearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+  },
+  categorySearchIcon: {
+    marginRight: 10,
+  },
+  categorySearchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+    paddingVertical: 4,
+  },
+  categoryDropdownScroll: {
+    maxHeight: 220,
+  },
+  noCategoryContainer: {
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noCategoryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  categoryRetryRow: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  categoryRetryText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#DC2626',
+  },
+  categoryDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  categoryDropdownItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  categoryIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  categoryDropdownItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+    flex: 1,
+  },
+  categoryDropdownItemTextSelected: {
+    color: theme.colors.primary,
+    fontWeight: '800',
+  },
+  textInputContainerError: {
+    borderColor: '#EF4444',
+    borderWidth: 2,
+    backgroundColor: '#FEF2F2',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '700',
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  reviewMapPreviewContainer: {
+    height: 220,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 12,
+    marginBottom: 4,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    position: 'relative',
+  },
+  reviewMapView: {
+    flex: 1,
+  },
+  reviewMapBadge: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    zIndex: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+  },
+  reviewMapBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: theme.colors.primary,
+  },
+  selectedCategoryChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  selectedCategoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+  },
+  selectedCategoryChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  unselectedCheckbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+  },
+  categoryDropdownDoneBtn: {
+    backgroundColor: theme.colors.primary,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryDropdownDoneText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 14,
+  },
 });
+

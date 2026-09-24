@@ -5,8 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  TextInput,
-  Switch,
   Platform,
   Dimensions,
 } from 'react-native';
@@ -14,26 +12,21 @@ import {
   MapPin,
   ChevronLeft,
   Sliders,
-  Clock,
   Compass,
-  CheckCircle,
-  AlertTriangle,
   Plus,
   Minus,
-  Navigation,
-  Globe,
-  Settings,
-  Sparkles,
   Map,
   X,
   Check,
 } from 'lucide-react-native';
-import { Map as MapLibreMap, Camera, Marker, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
+import MapView, { Marker, Circle, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../theme';
 import { AuthContext } from '../context/AuthContext';
+import { api } from '../api';
 import Toast from 'react-native-toast-message';
+import { useTranslation } from '../constants/translations';
 
 const { width } = Dimensions.get('window');
 
@@ -41,6 +34,67 @@ const { width } = Dimensions.get('window');
 const DEFAULT_SHOP_LOC = {
   latitude: 21.2401,
   longitude: 72.8735,
+};
+
+
+/**
+ * Reads a shop's pin + delivery zone off the GET /owner/shop payload.
+ *
+ * The API returns `lat`/`lng` and a `delivery_zone` of
+ * { method: 'radius'|'polygon', radius_m, ring }. The mock used
+ * latitude/longitude/delivery_boundary_type/delivery_radius_km/delivery_polygon,
+ * and every one of those resolved to undefined against the real API — which is
+ * how a saved pin silently reverted to DEFAULT_SHOP_LOC.
+ */
+const geofenceFromShop = (shop) => {
+  const lat = Number(shop?.lat);
+  const lng = Number(shop?.lng);
+  const zone = shop?.delivery_zone || {};
+
+  // A ring is [[lng, lat], ...] and the server closes it, so the repeated final
+  // point is dropped before it becomes an editable vertex.
+  const ring = Array.isArray(zone.ring) ? zone.ring : [];
+  const openRing =
+    ring.length > 1 &&
+    ring[0][0] === ring[ring.length - 1][0] &&
+    ring[0][1] === ring[ring.length - 1][1]
+      ? ring.slice(0, -1)
+      : ring;
+
+  return {
+    shopLoc:
+      Number.isFinite(lat) && Number.isFinite(lng)
+        ? { latitude: lat, longitude: lng }
+        : DEFAULT_SHOP_LOC,
+    boundaryMode: zone.method === 'polygon' ? 'custom' : 'radius',
+    radiusKm: zone.radius_m ? zone.radius_m / 1000 : 3.0,
+    customPoints:
+      openRing.length >= 3
+        ? openRing.map(([lngVal, latVal]) => ({ latitude: latVal, longitude: lngVal }))
+        : [],
+  };
+};
+
+const getCirclePoints = (latitude, longitude, radiusKm) => {
+  if (!latitude || !longitude || !radiusKm) return [];
+  const points = 32;
+  const coords = [];
+  const distance = radiusKm / 6371; 
+  
+  const latRad = (latitude * Math.PI) / 180;
+  const lngRad = (longitude * Math.PI) / 180;
+  
+  for (let i = 0; i < points; i++) {
+    const theta = (i * 2 * Math.PI) / points;
+    const lat = Math.asin(Math.sin(latRad) * Math.cos(distance) + Math.cos(latRad) * Math.sin(distance) * Math.cos(theta));
+    const lng = lngRad + Math.atan2(Math.sin(theta) * Math.sin(distance) * Math.cos(latRad), Math.cos(distance) - Math.sin(latRad) * Math.sin(lat));
+    
+    coords.push({
+      latitude: (lat * 180) / Math.PI,
+      longitude: (lng * 180) / Math.PI,
+    });
+  }
+  return coords;
 };
 
 const RADIUS_OPTIONS = [
@@ -54,14 +108,6 @@ const RADIUS_OPTIONS = [
   { label: '15 km', value: 15.0 },
   { label: '20 km', value: 20.0 },
 ];
-
-const mockLocations = {
-  'city light': { lat: 21.2215, lng: 72.8095, dist: 1.5, name: 'City Light' },
-  'vesu': { lat: 21.1415, lng: 72.7712, dist: 2.5, name: 'Vesu' },
-  'piplod': { lat: 21.1712, lng: 72.7845, dist: 3.5, name: 'Piplod' },
-  'athwa': { lat: 21.1895, lng: 72.8012, dist: 4.5, name: 'Athwa Lines' },
-  'adajan': { lat: 21.2154, lng: 72.7915, dist: 5.5, name: 'Adajan Patia' },
-};
 
 const makeCircleGeoJson = (latitude, longitude, radiusKm) => {
   if (!latitude || !longitude || !radiusKm) return null;
@@ -99,147 +145,115 @@ const makeCircleGeoJson = (latitude, longitude, radiusKm) => {
 };
 
 export const DeliveryAreaScreen = () => {
+  const { t } = useTranslation();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { shop } = useContext(AuthContext);
-  const mapCameraRef = useRef(null);
+  const { shop, refreshShop } = useContext(AuthContext);
+  const mapRef = useRef(null);
 
-  // States
-  const [deliveryEnabled, setDeliveryEnabled] = useState(true);
-  const [locationOption, setLocationOption] = useState('shop'); // 'shop' | 'current'
-  const [boundaryMode, setBoundaryMode] = useState('radius'); // 'radius' | 'custom'
-  
-  const [shopLoc, setShopLoc] = useState({
-    latitude: shop?.latitude || DEFAULT_SHOP_LOC.latitude,
-    longitude: shop?.longitude || DEFAULT_SHOP_LOC.longitude,
-  });
+  // States — seeded from the shop already in context so the map opens on the
+  // real pin rather than the Surat default.
+  const initialGeofence = geofenceFromShop(shop);
+  const [boundaryMode, setBoundaryMode] = useState(initialGeofence.boundaryMode); // 'radius' | 'custom'
+  const [shopLoc, setShopLoc] = useState(initialGeofence.shopLoc);
+  const [radiusKm, setRadiusKm] = useState(initialGeofence.radiusKm);
 
-  const [radiusKm, setRadiusKm] = useState(3.0);
+  // Initial state ref to revert changes on Reset Shape
+  const initialStateRef = useRef(null);
 
   // Custom Boundary points state (green polygon)
-  const [customPoints, setCustomPoints] = useState([
-    { latitude: shopLoc.latitude + 0.015, longitude: shopLoc.longitude - 0.015 },
-    { latitude: shopLoc.latitude + 0.015, longitude: shopLoc.longitude + 0.015 },
-    { latitude: shopLoc.latitude - 0.015, longitude: shopLoc.longitude + 0.015 },
-    { latitude: shopLoc.latitude - 0.015, longitude: shopLoc.longitude - 0.015 },
-  ]);
+  const [customPoints, setCustomPoints] = useState(initialGeofence.customPoints);
 
-  useEffect(() => {
-    if (shop) {
-      const lat = parseFloat(shop.latitude) || DEFAULT_SHOP_LOC.latitude;
-      const lng = parseFloat(shop.longitude) || DEFAULT_SHOP_LOC.longitude;
-      setShopLoc({ latitude: lat, longitude: lng });
-      setCustomPoints([
-        { latitude: lat + 0.015, longitude: lng - 0.015 },
-        { latitude: lat + 0.015, longitude: lng + 0.015 },
-        { latitude: lat - 0.015, longitude: lng + 0.015 },
-        { latitude: lat - 0.015, longitude: lng - 0.015 },
-      ]);
+  const focusOnBoundary = (mode = boundaryMode, pts = customPoints, rad = radiusKm, loc = shopLoc) => {
+    if (!mapRef.current || !loc || !loc.latitude || !loc.longitude) return;
 
-      // Explicitly move the camera viewport to center on shop location
-      setTimeout(() => {
-        if (mapCameraRef.current) {
-          mapCameraRef.current.flyTo({
-            center: [lng, lat],
-            zoom: 13,
-            duration: 1000,
-          });
-        }
-      }, 500);
-    }
-  }, [shop]);
-
-  // Serviceability Checker
-  const [checkAddressText, setCheckAddressText] = useState('');
-  const [serviceabilityResult, setServiceabilityResult] = useState(null); // { deliverable: boolean, msg: string }
-
-  // Delivery Charges States
-  const [localFee, setLocalFee] = useState('20');
-  const [localMin, setLocalMin] = useState('100');
-  const [localTime, setLocalTime] = useState('25 mins');
-
-  const [outerFee, setOuterFee] = useState('45');
-  const [outerMin, setOuterMin] = useState('250');
-  const [outerTime, setOuterTime] = useState('45 mins');
-
-  // Settings Toggles
-  const [pickupOnly, setPickupOnly] = useState(false);
-  const [acceptOutside, setAcceptOutside] = useState(false);
-  const [autoRejectOutside, setAutoRejectOutside] = useState(true);
-  const [showDeliveryTime, setShowDeliveryTime] = useState(true);
-  const [expressEnabled, setExpressEnabled] = useState(true);
-
-  // Operations Timing
-  const [openTime, setOpenTime] = useState('08:00 AM');
-  const [closeTime, setCloseTime] = useState('10:00 PM');
-  const [emergencyPause, setEmergencyPause] = useState(false);
-  const [temporaryClosed, setTemporaryClosed] = useState(false);
-
-  // Handle option swap
-  const handleLocationOptionChange = (option) => {
-    setLocationOption(option);
-    if (option === 'current') {
-      // Simulate getting current GPS location (offset slightly from store center)
-      const currentGps = {
-        latitude: DEFAULT_SHOP_LOC.latitude + 0.002,
-        longitude: DEFAULT_SHOP_LOC.longitude + 0.003,
-      };
-      setShopLoc(currentGps);
-      mapCameraRef.current?.flyTo({
-        center: [currentGps.longitude, currentGps.latitude],
-        zoom: 14,
-        duration: 1000,
+    if (mode === 'custom' && Array.isArray(pts) && pts.length >= 3) {
+      mapRef.current.fitToCoordinates(pts, {
+        edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
+        animated: true,
       });
-      Toast.show({ type: 'info', text1: 'GPS Synced', text2: 'Using simulated current mobile location.' });
     } else {
-      const storeLoc = {
-        latitude: shop?.latitude || DEFAULT_SHOP_LOC.latitude,
-        longitude: shop?.longitude || DEFAULT_SHOP_LOC.longitude,
-      };
-      setShopLoc(storeLoc);
-      mapCameraRef.current?.flyTo({
-        center: [storeLoc.longitude, storeLoc.latitude],
-        zoom: 14,
-        duration: 1000,
-      });
-      Toast.show({ type: 'info', text1: 'Address Synced', text2: 'Using location entered during store setup.' });
+      const latDelta = (rad * 2.0) / 111;
+      const lngDelta = (rad * 2.0) / (111 * Math.cos((loc.latitude * Math.PI) / 180));
+      mapRef.current.animateToRegion({
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        latitudeDelta: Math.max(0.006, latDelta),
+        longitudeDelta: Math.max(0.006, lngDelta),
+      }, 800);
     }
   };
 
+  useEffect(() => {
+    const loadData = async () => {
+      let currentShop = shop;
+      if (!currentShop || !currentShop.name) {
+        try {
+          const fresh = await refreshShop();
+          if (fresh) currentShop = fresh;
+        } catch (e) {
+          console.warn('[DeliveryAreaScreen] Failed to load shop:', e);
+        }
+      }
+
+      if (currentShop) {
+        // Same reader as the initial state — see geofenceFromShop().
+        const { shopLoc: initialShopLoc, boundaryMode: mode, radiusKm: rad, customPoints: pts } =
+          geofenceFromShop(currentShop);
+
+        setShopLoc(initialShopLoc);
+        setBoundaryMode(mode);
+        setRadiusKm(rad);
+        setCustomPoints(pts);
+
+        initialStateRef.current = {
+          shopLoc: initialShopLoc,
+          boundaryMode: mode,
+          radiusKm: rad,
+          customPoints: pts,
+        };
+
+        setTimeout(() => {
+          focusOnBoundary(mode, pts, rad, initialShopLoc);
+        }, 500);
+      }
+    };
+
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shop]);
+
   const handleZoom = (zoomIn) => {
-    mapCameraRef.current?.flyTo({
-      zoom: zoomIn ? 15 : 12,
-      duration: 500,
+    mapRef.current?.getCamera().then(cam => {
+      if (cam) {
+        cam.zoom = zoomIn ? (cam.zoom + 1) : (cam.zoom - 1);
+        mapRef.current?.animateCamera(cam, { duration: 300 });
+      }
     });
   };
 
   const handleRecenter = () => {
-    mapCameraRef.current?.flyTo({
-      center: [shopLoc.longitude, shopLoc.latitude],
-      zoom: 14,
-      duration: 1000,
-    });
+    focusOnBoundary(boundaryMode, customPoints, radiusKm, shopLoc);
   };
 
-  const getZoomForRadius = (km) => {
-    if (km <= 1) return 14.2;
-    if (km <= 2) return 13.2;
-    if (km <= 3) return 12.6;
-    if (km <= 5) return 11.8;
-    if (km <= 8) return 11.1;
-    if (km <= 10) return 10.8;
-    if (km <= 15) return 10.2;
-    return 9.7;
+  const handleSelectMode = (newMode) => {
+    setBoundaryMode(newMode);
+    setTimeout(() => {
+      focusOnBoundary(newMode, customPoints, radiusKm, shopLoc);
+    }, 150);
   };
 
   const updateRadiusWithZoom = (newVal) => {
     setRadiusKm(newVal);
-    if (mapCameraRef.current && shopLoc.latitude && shopLoc.longitude) {
-      mapCameraRef.current.flyTo({
-        center: [shopLoc.longitude, shopLoc.latitude],
-        zoom: getZoomForRadius(newVal),
-        duration: 600,
-      });
+    if (mapRef.current && shopLoc.latitude && shopLoc.longitude) {
+      const latDelta = (newVal * 2.0) / 111;
+      const lngDelta = (newVal * 2.0) / (111 * Math.cos((shopLoc.latitude * Math.PI) / 180));
+      mapRef.current.animateToRegion({
+        latitude: shopLoc.latitude,
+        longitude: shopLoc.longitude,
+        latitudeDelta: Math.max(0.006, latDelta),
+        longitudeDelta: Math.max(0.006, lngDelta),
+      }, 600);
     }
   };
 
@@ -249,86 +263,113 @@ export const DeliveryAreaScreen = () => {
     updateRadiusWithZoom(newVal);
   };
 
-  // Custom polygon edit actions
-  const handleAddPoint = () => {
-    // Add point offset from last coordinate
-    const last = customPoints[customPoints.length - 1] || shopLoc;
-    const newPt = {
-      latitude: last.latitude + 0.003,
-      longitude: last.longitude + 0.003,
-    };
-    setCustomPoints(prev => [...prev, newPt]);
-    Toast.show({ type: 'success', text1: 'Point Added', text2: 'Added vertex at bottom corner.' });
+  const handleMapPress = (e) => {
+    if (!e || !e.nativeEvent || !e.nativeEvent.coordinate) return;
+    const { latitude, longitude } = e.nativeEvent.coordinate;
+
+    if (boundaryMode === 'radius') {
+      setShopLoc({ latitude, longitude });
+      if (mapRef.current) {
+        const latDelta = (radiusKm * 2.0) / 111;
+        const lngDelta = (radiusKm * 2.0) / (111 * Math.cos((latitude * Math.PI) / 180));
+        mapRef.current.animateToRegion({
+          latitude,
+          longitude,
+          latitudeDelta: Math.max(0.006, latDelta),
+          longitudeDelta: Math.max(0.006, lngDelta),
+        }, 600);
+      }
+      Toast.show({ type: 'success', text1: t('locationSetTitle'), text2: t('locationSetSub') });
+    } else {
+      setCustomPoints(prev => [...prev, { latitude, longitude }]);
+      Toast.show({ type: 'success', text1: t('vertexAdded'), text2: t('vertexAddedSub') });
+    }
   };
 
-  const handleMovePoint = () => {
-    // Offset point 0 to simulate moving vertices
-    if (customPoints.length === 0) return;
-    setCustomPoints(prev => prev.map((pt, idx) => idx === 0 ? { ...pt, latitude: pt.latitude + 0.002 } : pt));
-    Toast.show({ type: 'info', text1: 'Point Moved', text2: 'Repositioned vertex 1 on the map.' });
+  const handleVertexDrag = (index, newCoord) => {
+    if (!newCoord || !newCoord.latitude || !newCoord.longitude) return;
+    setCustomPoints(prev => {
+      const updated = [...prev];
+      updated[index] = { latitude: newCoord.latitude, longitude: newCoord.longitude };
+      return updated;
+    });
   };
 
   const handleDeletePoint = () => {
-    if (customPoints.length <= 3) {
-      Toast.show({ type: 'error', text1: 'Delete Failed', text2: 'Boundary requires at least 3 vertices.' });
+    if (customPoints.length === 0) {
+      Toast.show({ type: 'info', text1: t('noVertices'), text2: t('noVerticesSub') });
       return;
     }
     setCustomPoints(prev => prev.slice(0, -1));
-    Toast.show({ type: 'info', text1: 'Point Removed', text2: 'Removed last vertex.' });
+    Toast.show({ type: 'info', text1: t('pointRemoved'), text2: t('pointRemovedSub') });
   };
 
   const handleResetBoundary = () => {
-    setCustomPoints([
-      { latitude: shopLoc.latitude + 0.012, longitude: shopLoc.longitude - 0.012 },
-      { latitude: shopLoc.latitude + 0.012, longitude: shopLoc.longitude + 0.012 },
-      { latitude: shopLoc.latitude - 0.012, longitude: shopLoc.longitude + 0.012 },
-      { latitude: shopLoc.latitude - 0.012, longitude: shopLoc.longitude - 0.012 },
-    ]);
-    Toast.show({ type: 'info', text1: 'Boundary Reset', text2: 'Reverted coordinates back to default box.' });
+    const init = initialStateRef.current || geofenceFromShop(shop);
+
+    setShopLoc(init.shopLoc);
+    setRadiusKm(init.radiusKm);
+    setBoundaryMode(init.boundaryMode);
+    setCustomPoints(init.customPoints);
+
+    setTimeout(() => {
+      focusOnBoundary(init.boundaryMode, init.customPoints, init.radiusKm, init.shopLoc);
+    }, 100);
+
+    Toast.show({ type: 'info', text1: t('changesReset'), text2: t('changesResetSub') });
   };
 
-  // Check Address serviceability
-  const handleCheckAddress = () => {
-    if (!checkAddressText.trim()) {
-      setServiceabilityResult(null);
-      return;
-    }
-    const cleanQuery = checkAddressText.toLowerCase().trim();
-    const loc = mockLocations[cleanQuery];
+  const handleSaveAll = async () => {
+    try {
+      // The storefront pin is a SHOP field, not a zone field, so moving it has
+      // to be persisted with PATCH /owner/shop — saving only the zone left the
+      // pin wherever it was before.
+      //
+      // It also has to go FIRST: a radius zone is measured from the shop's own
+      // location server-side, so writing the zone before the pin would centre
+      // the circle on the old point. lat and lng must be sent together or the
+      // server rejects the patch.
+      if (
+        typeof shopLoc?.latitude === 'number' &&
+        typeof shopLoc?.longitude === 'number'
+      ) {
+        await api.shop.updateShop({ lat: shopLoc.latitude, lng: shopLoc.longitude });
+      }
 
-    if (loc) {
+      // PUT /owner/shop/delivery-zone. Radius travels in METRES; a polygon ring
+      // is [[lng, lat], ...] — note the order flip from the map's
+      // { latitude, longitude } points — and the server closes the ring itself.
       if (boundaryMode === 'radius') {
-        const canDeliver = loc.dist <= radiusKm;
-        setServiceabilityResult({
-          deliverable: canDeliver,
-          msg: canDeliver 
-            ? `Deliverable (Located ${loc.dist} km away, inside ${radiusKm} km limit)`
-            : `Outside Area (Located ${loc.dist} km away, exceeds ${radiusKm} km limit)`
+        await api.shop.setDeliveryZone({
+          method: 'radius',
+          radius_m: Math.round((radiusKm || 1) * 1000),
         });
       } else {
-        // Custom polygon mock serviceability check (Vesu, City Light and Piplod are serviced)
-        const canDeliver = cleanQuery === 'vesu' || cleanQuery === 'city light' || cleanQuery === 'piplod';
-        setServiceabilityResult({
-          deliverable: canDeliver,
-          msg: canDeliver
-            ? `Deliverable (Serviced by custom geofence layout)`
-            : `Outside Area (Not covered in custom zone bounds)`
+        if ((customPoints || []).length < 3) {
+          throw new Error('Tap at least 3 points on the map to define a boundary.');
+        }
+        await api.shop.setDeliveryZone({
+          method: 'polygon',
+          ring: customPoints.map((pt) => [pt.longitude, pt.latitude]),
         });
       }
-    } else {
-      setServiceabilityResult({
-        deliverable: false,
-        msg: 'Address outside known service regions.'
+      await refreshShop();
+      Toast.show({
+        type: 'success',
+        text1: t('boundarySaved'),
+        text2: t('boundarySavedSub')
+      });
+      // Saving is the end of the task — leaving the owner on the map made it
+      // look as though nothing had happened.
+      if (navigation.canGoBack()) navigation.goBack();
+    } catch (e) {
+      console.error('[DeliveryAreaScreen] Save failed:', e);
+      Toast.show({
+        type: 'error',
+        text1: t('saveFailedTitle'),
+        text2: e.message || 'Could not save boundary settings.'
       });
     }
-  };
-
-  const handleSaveAll = () => {
-    Toast.show({
-      type: 'success',
-      text1: 'Boundary Saved Successfully',
-      text2: 'Delivery configs updated and persisted locally.'
-    });
   };
 
   // GeoJSON circles/polygons
@@ -361,140 +402,126 @@ export const DeliveryAreaScreen = () => {
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <ChevronLeft color={theme.colors.textDark} size={24} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Delivery Management</Text>
+        <Text style={styles.headerTitle}>{t('deliveryManagement')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-        {/* Status card */}
-        <View style={styles.statusCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.statusLabel}>Delivery Operations Status</Text>
-            <Text style={[styles.statusValue, { color: deliveryEnabled ? theme.colors.success : theme.colors.textLight }]}>
-              {deliveryEnabled ? '✓ Delivery Service Enabled' : '✕ Delivery Service Disabled'}
-            </Text>
-          </View>
-          <Switch
-            value={deliveryEnabled}
-            onValueChange={setDeliveryEnabled}
-            trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }}
-            thumbColor={deliveryEnabled ? theme.colors.primary : '#F1F5F9'}
-          />
-        </View>
-
-        {/* Location selector details */}
-        <Text style={styles.sectionHeader}>Shop Anchor Location</Text>
-        <View style={styles.locationOptionsRow}>
+      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Platform.OS === 'android' ? 140 : 100 }}>
+        {/* Boundary Area method selector */}
+        <Text style={styles.sectionHeader}>{t('deliveryBoundaryMethod')}</Text>
+        <View style={styles.methodsRow}>
           <TouchableOpacity
-            style={[styles.locationTab, locationOption === 'shop' && styles.locationTabActive]}
-            onPress={() => handleLocationOptionChange('shop')}
+            style={[styles.methodCard, boundaryMode === 'radius' && styles.methodCardActive]}
+            onPress={() => handleSelectMode('radius')}
           >
-            <Text style={[styles.locationTabText, locationOption === 'shop' && styles.locationTabTextActive]}>
-              Use Shop Address
-            </Text>
+            <Sliders color={boundaryMode === 'radius' ? theme.colors.primary : theme.colors.textLight} size={24} />
+            <Text style={styles.methodTitle}>{t('radiusCircle')}</Text>
+            <Text style={styles.methodDesc}>{t('radiusCircleSub')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.locationTab, locationOption === 'current' && styles.locationTabActive]}
-            onPress={() => handleLocationOptionChange('current')}
-          >
-            <Text style={[styles.locationTabText, locationOption === 'current' && styles.locationTabTextActive]}>
-              Use Current Location
-            </Text>
-          </TouchableOpacity>
-        </View>
 
-        <View style={styles.shopDetailBox}>
-          <View style={styles.detailTextRow}>
-            <MapPin color={theme.colors.primary} size={18} style={{ marginRight: 8, marginTop: 2 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.shopNameText}>{shop?.name || 'Fresh Mart Storefront'}</Text>
-              <Text style={styles.shopAddressText}>{shop?.address || '102 Blue Diamond Complex, Surat, Gujarat'}</Text>
-            </View>
-          </View>
-          <View style={styles.coordsGrid}>
-            <View style={styles.coordCol}>
-              <Text style={styles.coordLabel}>Latitude</Text>
-              <Text style={styles.coordVal}>{shopLoc.latitude.toFixed(6)}</Text>
-            </View>
-            <View style={styles.coordCol}>
-              <Text style={styles.coordLabel}>Longitude</Text>
-              <Text style={styles.coordVal}>{shopLoc.longitude.toFixed(6)}</Text>
-            </View>
-          </View>
+          <TouchableOpacity
+            style={[styles.methodCard, boundaryMode === 'custom' && styles.methodCardActive]}
+            onPress={() => handleSelectMode('custom')}
+          >
+            <Map color={boundaryMode === 'custom' ? theme.colors.primary : theme.colors.textLight} size={24} />
+            <Text style={styles.methodTitle}>{t('customShape')}</Text>
+            <Text style={styles.methodDesc}>{t('customShapeSub')}</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Map area */}
-        <Text style={styles.sectionHeader}>Geofence Bound Map</Text>
+        <Text style={styles.sectionHeader}>{t('geofenceBoundMap')}</Text>
         <View style={styles.mapContainer}>
-          <MapLibreMap 
+          <MapView 
+            ref={mapRef}
             style={styles.mapView}
-            mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
-            logoEnabled={false}
-            attributionEnabled={false}
-            androidView="surface"
+            provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+            initialRegion={{
+              latitude: shopLoc.latitude,
+              longitude: shopLoc.longitude,
+              latitudeDelta: (radiusKm * 2.6) / 111,
+              longitudeDelta: (radiusKm * 2.6) / (111 * Math.cos((shopLoc.latitude * Math.PI) / 180)),
+            }}
+            onMapReady={() => {
+              focusOnBoundary(boundaryMode, customPoints, radiusKm, shopLoc);
+            }}
+            onPress={handleMapPress}
+            showsUserLocation={true}
+            showsMyLocationButton={false}
           >
-            <Camera
-              ref={mapCameraRef}
-              defaultSettings={{
-                centerCoordinate: [shopLoc.longitude, shopLoc.latitude],
-                zoomLevel: 13,
-              }}
-            />
-
-            {/* Shop Pin Marker */}
-            <Marker coordinate={[shopLoc.longitude, shopLoc.latitude]}>
-              <View style={styles.markerContainer}>
-                <View style={styles.markerBubble}>
-                  <MapPin color="#FFF" size={14} />
+            {/* Shop Pin Marker (Shown only in Radius Circle mode) */}
+            {boundaryMode === 'radius' && (
+              <Marker
+                coordinate={{ latitude: shopLoc.latitude, longitude: shopLoc.longitude }}
+                draggable
+                onPress={(e) => handleMapPress(e)}
+                onDragEnd={(e) => {
+                  if (e && e.nativeEvent && e.nativeEvent.coordinate) {
+                    const { latitude, longitude } = e.nativeEvent.coordinate;
+                    setShopLoc({ latitude, longitude });
+                    if (mapRef.current) {
+                      const latDelta = (radiusKm * 2.0) / 111;
+                      const lngDelta = (radiusKm * 2.0) / (111 * Math.cos((latitude * Math.PI) / 180));
+                      mapRef.current.animateToRegion({
+                        latitude,
+                        longitude,
+                        latitudeDelta: Math.max(0.006, latDelta),
+                        longitudeDelta: Math.max(0.006, lngDelta),
+                      }, 600);
+                    }
+                    Toast.show({ type: 'success', text1: t('storefrontPinMoved'), text2: t('storefrontPinMovedSub') });
+                  }
+                }}
+              >
+                <View style={styles.markerContainer}>
+                  <View style={styles.markerBubble}>
+                    <MapPin color="#FFF" size={14} />
+                  </View>
+                  <View style={styles.markerTail} />
                 </View>
-                <View style={styles.markerTail} />
-              </View>
-            </Marker>
-
-            {/* Radius Circle GeoJSON layer */}
-            {boundaryMode === 'radius' && circleGeoJson && (
-              <GeoJSONSource id="circleSource" data={circleGeoJson}>
-                <Layer
-                  id="circleFill"
-                  type="fill"
-                  style={{
-                    fillColor: '#16A34A',
-                    fillOpacity: 0.15,
-                  }}
-                />
-                <Layer
-                  id="circleOutline"
-                  type="line"
-                  style={{
-                    lineColor: '#16A34A',
-                    lineWidth: 2.5,
-                  }}
-                />
-              </GeoJSONSource>
+              </Marker>
             )}
 
-            {/* Custom Polygon GeoJSON layer */}
-            {boundaryMode === 'custom' && customPolygonGeoJson && (
-              <GeoJSONSource id="customSource" data={customPolygonGeoJson}>
-                <Layer
-                  id="customFill"
-                  type="fill"
-                  style={{
-                    fillColor: '#22C55E',
-                    fillOpacity: 0.22,
-                  }}
-                />
-                <Layer
-                  id="customOutline"
-                  type="line"
-                  style={{
-                    lineColor: '#15803D',
-                    lineWidth: 3,
-                  }}
-                />
-              </GeoJSONSource>
+            {/* Radius Circle */}
+            {boundaryMode === 'radius' && (
+              <Circle
+                center={{ latitude: shopLoc.latitude, longitude: shopLoc.longitude }}
+                radius={radiusKm * 1000}
+                strokeColor="#16A34A"
+                strokeWidth={2.5}
+                fillColor="rgba(22, 163, 74, 0.18)"
+                tappable={true}
+                onPress={handleMapPress}
+              />
             )}
-          </MapLibreMap>
+
+            {/* Custom Polygon */}
+            {boundaryMode === 'custom' && customPoints.length > 0 && (
+              <>
+                <Polygon
+                  coordinates={customPoints}
+                  strokeColor="#15803D"
+                  strokeWidth={3}
+                  fillColor="rgba(34, 197, 94, 0.22)"
+                  tappable={true}
+                  onPress={handleMapPress}
+                />
+                {customPoints.map((pt, idx) => (
+                  <Marker
+                    key={idx.toString()}
+                    coordinate={pt}
+                    draggable
+                    onDragEnd={(e) => handleVertexDrag(idx, e.nativeEvent.coordinate)}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                  >
+                    <View style={styles.vertexDot}>
+                      <Text style={styles.vertexText}>{idx + 1}</Text>
+                    </View>
+                  </Marker>
+                ))}
+              </>
+            )}
+          </MapView>
 
           {/* Map Controls */}
           <View style={styles.mapOverlayControls}>
@@ -520,32 +547,10 @@ export const DeliveryAreaScreen = () => {
           )}
         </View>
 
-        {/* Boundary Area method selector */}
-        <Text style={styles.sectionHeader}>Delivery Boundary Method</Text>
-        <View style={styles.methodsRow}>
-          <TouchableOpacity
-            style={[styles.methodCard, boundaryMode === 'radius' && styles.methodCardActive]}
-            onPress={() => setBoundaryMode('radius')}
-          >
-            <Sliders color={boundaryMode === 'radius' ? theme.colors.primary : theme.colors.textLight} size={24} />
-            <Text style={styles.methodTitle}>Radius Circle</Text>
-            <Text style={styles.methodDesc}>Deliver within circular limits of your store.</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.methodCard, boundaryMode === 'custom' && styles.methodCardActive]}
-            onPress={() => setBoundaryMode('custom')}
-          >
-            <Map color={boundaryMode === 'custom' ? theme.colors.primary : theme.colors.textLight} size={24} />
-            <Text style={styles.methodTitle}>Custom Shape</Text>
-            <Text style={styles.methodDesc}>Draw customized polygons covering delivery zones.</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Dynamic Controls based on Boundary Method */}
         {boundaryMode === 'radius' ? (
           <View style={styles.configCard}>
-            <Text style={styles.configHeader}>Select Delivery Radius Limit</Text>
+            <Text style={styles.configHeader}>{t('selectRadiusLimit')}</Text>
             <View style={styles.sliderRow}>
               <TouchableOpacity style={styles.adjustBtn} onPress={() => handleAdjustRadius(-0.5)}>
                 <Minus color="#FFF" size={16} />
@@ -588,202 +593,35 @@ export const DeliveryAreaScreen = () => {
             </View>
 
             <View style={styles.coverageBox}>
-              <Text style={styles.coverageLabel}>Estimated Coverage Area:</Text>
+              <Text style={styles.coverageLabel}>{t('estimatedCoverage')}</Text>
               <Text style={styles.coverageValue}>~{(Math.PI * radiusKm * radiusKm).toFixed(1)} sq. km</Text>
             </View>
           </View>
         ) : (
           <View style={styles.configCard}>
-            <Text style={styles.configHeader}>Polygon Vertices Editor</Text>
-            <Text style={styles.configDesc}>Manually reposition points to carve out serviced neighborhoods.</Text>
+            <Text style={styles.configHeader}>{t('polygonVerticesEditor')}</Text>
+            <Text style={styles.configDesc}>{t('polygonEditorHint')}</Text>
             
             <View style={styles.editorActionsGrid}>
-              <TouchableOpacity style={styles.editorActionBtn} onPress={handleAddPoint}>
-                <Plus size={16} color={theme.colors.textDark} style={{ marginRight: 6 }} />
-                <Text style={styles.editorActionText}>Add Point</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.editorActionBtn} onPress={handleMovePoint}>
-                <Sliders size={16} color={theme.colors.textDark} style={{ marginRight: 6 }} />
-                <Text style={styles.editorActionText}>Move Point</Text>
-              </TouchableOpacity>
-
               <TouchableOpacity style={styles.editorActionBtn} onPress={handleDeletePoint}>
                 <Minus size={16} color={theme.colors.error} style={{ marginRight: 6 }} />
-                <Text style={[styles.editorActionText, { color: theme.colors.error }]}>Delete Point</Text>
+                <Text style={[styles.editorActionText, { color: theme.colors.error }]}>{t('deleteLastPoint')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.editorActionBtn} onPress={handleResetBoundary}>
                 <X size={16} color={theme.colors.textLight} style={{ marginRight: 6 }} />
-                <Text style={styles.editorActionText}>Reset Shape</Text>
+                <Text style={styles.editorActionText}>{t('resetShape')}</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
-
-        {/* Address serviceability checker */}
-        <Text style={styles.sectionHeader}>Serviceability Verification</Text>
-        <View style={styles.configCard}>
-          <Text style={styles.configHeader}>Test Local Address</Text>
-          <View style={styles.checkerRow}>
-            <TextInput
-              style={styles.checkerInput}
-              placeholder="e.g. Vesu, Adajan, City Light, Piplod..."
-              placeholderTextColor={theme.colors.textLight}
-              value={checkAddressText}
-              onChangeText={(txt) => {
-                setCheckAddressText(txt);
-                setServiceabilityResult(null);
-              }}
-            />
-            <TouchableOpacity style={styles.checkBtn} onPress={handleCheckAddress}>
-              <Text style={styles.checkBtnText}>Check Area</Text>
-            </TouchableOpacity>
-          </View>
-
-          {serviceabilityResult && (
-            <View style={[
-              styles.resultBox,
-              serviceabilityResult.deliverable ? styles.resultSuccess : styles.resultFailed
-            ]}>
-              <Text style={[
-                styles.resultText,
-                serviceabilityResult.deliverable ? styles.resultSuccessText : styles.resultFailedText
-              ]}>
-                {serviceabilityResult.msg}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Delivery Charges config */}
-        <Text style={styles.sectionHeader}>Delivery Charges Matrix</Text>
-        <View style={styles.pricingCard}>
-          <Text style={styles.pricingGroupTitle}>Local Zone (Core Service Bounds)</Text>
-          <View style={styles.pricingGrid}>
-            <View style={styles.pricingCol}>
-              <Text style={styles.pricingInputLabel}>Delivery Fee (₹)</Text>
-              <TextInput style={styles.pricingInput} value={localFee} onChangeText={setLocalFee} keyboardType="numeric" />
-            </View>
-            <View style={styles.pricingCol}>
-              <Text style={styles.pricingInputLabel}>Min Order (₹)</Text>
-              <TextInput style={styles.pricingInput} value={localMin} onChangeText={setLocalMin} keyboardType="numeric" />
-            </View>
-            <View style={styles.pricingCol}>
-              <Text style={styles.pricingInputLabel}>Est. Time</Text>
-              <TextInput style={styles.pricingInput} value={localTime} onChangeText={setLocalTime} />
-            </View>
-          </View>
-
-          <View style={styles.pricingDivider} />
-
-          <Text style={styles.pricingGroupTitle}>Outer Zone (Boundary Threshold)</Text>
-          <View style={styles.pricingGrid}>
-            <View style={styles.pricingCol}>
-              <Text style={styles.pricingInputLabel}>Delivery Fee (₹)</Text>
-              <TextInput style={styles.pricingInput} value={outerFee} onChangeText={setOuterFee} keyboardType="numeric" />
-            </View>
-            <View style={styles.pricingCol}>
-              <Text style={styles.pricingInputLabel}>Min Order (₹)</Text>
-              <TextInput style={styles.pricingInput} value={outerMin} onChangeText={setOuterMin} keyboardType="numeric" />
-            </View>
-            <View style={styles.pricingCol}>
-              <Text style={styles.pricingInputLabel}>Est. Time</Text>
-              <TextInput style={styles.pricingInput} value={outerTime} onChangeText={setOuterTime} />
-            </View>
-          </View>
-        </View>
-
-        {/* Delivery Settings toggles */}
-        <Text style={styles.sectionHeader}>Fulfillment Rules</Text>
-        <View style={styles.togglesCard}>
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleTitle}>Enable Store Deliveries</Text>
-              <Text style={styles.toggleSub}>Allows home deliveries from shop.</Text>
-            </View>
-            <Switch value={deliveryEnabled} onValueChange={setDeliveryEnabled} trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }} thumbColor={deliveryEnabled ? theme.colors.primary : '#F1F5F9'} />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleTitle}>Pickup Only Option</Text>
-              <Text style={styles.toggleSub}>Disable home deliveries temporarily.</Text>
-            </View>
-            <Switch value={pickupOnly} onValueChange={setPickupOnly} trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }} thumbColor={pickupOnly ? theme.colors.primary : '#F1F5F9'} />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleTitle}>Accept orders outside boundary</Text>
-              <Text style={styles.toggleSub}>Processes orders beyond routing areas.</Text>
-            </View>
-            <Switch value={acceptOutside} onValueChange={setAcceptOutside} trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }} thumbColor={acceptOutside ? theme.colors.primary : '#F1F5F9'} />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleTitle}>Auto-reject outside boundary</Text>
-              <Text style={styles.toggleSub}>Instantly cancels out-of-bounds orders.</Text>
-            </View>
-            <Switch value={autoRejectOutside} onValueChange={setAutoRejectOutside} trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }} thumbColor={autoRejectOutside ? theme.colors.primary : '#F1F5F9'} />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleTitle}>Display delivery duration</Text>
-              <Text style={styles.toggleSub}>Displays ETA to checkout customers.</Text>
-            </View>
-            <Switch value={showDeliveryTime} onValueChange={setShowDeliveryTime} trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }} thumbColor={showDeliveryTime ? theme.colors.primary : '#F1F5F9'} />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleTitle}>Enable Express Delivery Option</Text>
-              <Text style={styles.toggleSub}>Fast routes for priority members.</Text>
-            </View>
-            <Switch value={expressEnabled} onValueChange={setExpressEnabled} trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }} thumbColor={expressEnabled ? theme.colors.primary : '#F1F5F9'} />
-          </View>
-        </View>
-
-        {/* Store schedule timing */}
-        <Text style={styles.sectionHeader}>Timing Schedules</Text>
-        <View style={styles.togglesCard}>
-          <View style={styles.timeScheduleCard}>
-            <View style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={styles.timeLabel}>Opening Time</Text>
-              <TextInput style={styles.timeInput} value={openTime} onChangeText={setOpenTime} />
-            </View>
-            <View style={{ width: 1.5, backgroundColor: theme.colors.border, height: '80%' }} />
-            <View style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={styles.timeLabel}>Closing Time</Text>
-              <TextInput style={styles.timeInput} value={closeTime} onChangeText={setCloseTime} />
-            </View>
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleTitle}>Emergency Shutdown Mode</Text>
-              <Text style={styles.toggleSub}>Temporarily goes offline immediately.</Text>
-            </View>
-            <Switch value={emergencyPause} onValueChange={setEmergencyPause} trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }} thumbColor={emergencyPause ? theme.colors.primary : '#F1F5F9'} />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleTitle}>Mark Store Closed Today</Text>
-              <Text style={styles.toggleSub}>Bypasses schedule calendar settings.</Text>
-            </View>
-            <Switch value={temporaryClosed} onValueChange={setTemporaryClosed} trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }} thumbColor={temporaryClosed ? theme.colors.primary : '#F1F5F9'} />
-          </View>
-        </View>
       </ScrollView>
 
       {/* Sticky Save Button */}
-      <View style={[styles.stickySaveContainer, { paddingBottom: insets.bottom > 0 ? insets.bottom + 6 : 16 }]}>
+      <View style={[styles.stickySaveContainer, { paddingBottom: Platform.OS === 'android' ? 64 : Math.max(insets.bottom + 16, 28) }]}>
         <TouchableOpacity style={styles.saveAllBtn} onPress={handleSaveAll}>
           <Check color="#FFF" size={20} style={{ marginRight: 8 }} />
-          <Text style={styles.saveAllText}>Save Boundary Settings</Text>
+          <Text style={styles.saveAllText}>{t('saveBoundarySettings')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -923,7 +761,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   mapContainer: {
-    height: 220,
+    height: 380,
     borderRadius: theme.roundness,
     borderWidth: 1.5,
     borderColor: theme.colors.border,
@@ -959,6 +797,22 @@ const styles = StyleSheet.create({
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
     borderTopColor: '#E53935',
+  },
+  vertexDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#16A34A',
+    borderWidth: 2,
+    borderColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+  },
+  vertexText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '900',
   },
   mapOverlayControls: {
     position: 'absolute',

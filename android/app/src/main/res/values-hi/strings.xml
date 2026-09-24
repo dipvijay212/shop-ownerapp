@@ -1,0 +1,6 @@
+<resources>
+    <string name="channel_new_orders">नए ऑर्डर</string>
+    <string name="channel_orders">ऑर्डर अपडेट</string>
+    <string name="channel_account">दुकान और भुगतान</string>
+    <string name="channel_general">सामान्य</string>
+</resources>

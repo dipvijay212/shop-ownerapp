@@ -157,7 +157,7 @@ export const WishlistScreen = () => {
         <TouchableOpacity style={{padding: 4}}>
           <Menu color="#006B54" size={26} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Local Shops</Text>
+        <Text style={styles.headerTitle}>Paasora</Text>
         <View style={styles.avatarContainer}>
           <Image source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' }} style={styles.avatar} />
         </View>

@@ -6,6 +6,7 @@ buildscript {
         targetSdkVersion = 36
         ndkVersion = "27.1.12297006"
         kotlinVersion = "2.1.20"
+        REACT_NATIVE_NODE_MODULES_DIR = "${rootDir}/../node_modules/react-native".toString()
     }
     repositories {
         google()
@@ -15,6 +16,17 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath("com.google.gms:google-services:4.5.0")
+    }
+}
+
+allprojects {
+    ext {
+        REACT_NATIVE_NODE_MODULES_DIR = "${rootDir}/../node_modules/react-native".toString()
+    }
+    tasks.withType(Exec).configureEach {
+        def currentPath = environment.get('PATH') ?: System.getenv('PATH') ?: ''
+        environment 'PATH', "/opt/homebrew/bin:/usr/local/bin:${currentPath}"
     }
 }
 

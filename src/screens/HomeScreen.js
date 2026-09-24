@@ -6,10 +6,12 @@ import { getCurrentLocation } from '../utils/location';
 import ShopCard from '../components/ShopCard';
 import ProductCard from '../components/ProductCard';
 import { theme } from '../theme';
+import { PaasoraPartnerLogo } from '../components/PaasoraPartnerLogo';
 import { useNavigation } from '@react-navigation/native';
 import { Menu, Heart, MapPin, Search, ChevronDown, ChevronRight } from 'lucide-react-native';
 import Animated, { SlideInDown, SlideOutDown } from 'react-native-reanimated';
 import { ensureLocationReady } from '../utils/locationHelper';
+import { formatShopCategories } from '../constants/shopCategories';
 export const HomeScreen = () => {
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -228,10 +230,10 @@ export const HomeScreen = () => {
         </View>
       </View>
 
-      {/* Title */}
-      <Text style={styles.mainTitle}>
-        <Text style={{color: theme.colors.primary}}>Local</Text> Shops
-      </Text>
+      {/* Brand */}
+      <View style={styles.brandRow}>
+        <PaasoraPartnerLogo width={104} color={theme.colors.primary} accent={theme.colors.background} />
+      </View>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
@@ -265,7 +267,7 @@ export const HomeScreen = () => {
                 <TouchableOpacity style={styles.searchShopHeader} onPress={() => handleShopPress(shop.id)} activeOpacity={0.8}>
                   <View style={styles.searchShopDetails}>
                     <View style={styles.searchShopCategoryRow}>
-                      <Text style={styles.searchShopCategoryText}>🏅 Best in {shop.category}</Text>
+                      <Text style={styles.searchShopCategoryText}>🏅 Best in {formatShopCategories(shop.category)}</Text>
                     </View>
                     <Text style={styles.searchShopName} numberOfLines={1}>{shop.name}</Text>
                     <Text style={styles.searchShopMeta}>⭐ {shop.rating_avg || '4.2'} (100+) • 30-35 mins</Text>
@@ -550,8 +552,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  mainTitle: {
-    ...theme.typography.title,
+  brandRow: {
     paddingHorizontal: theme.spacing.m,
     marginTop: theme.spacing.s,
     marginBottom: theme.spacing.m,

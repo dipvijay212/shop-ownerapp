@@ -1,12 +1,32 @@
-# Resolve react_native_pods.rb with node to allow for hoisting
-require Pod::Executable.execute_command('node', ['-p',
-  'require.resolve(
-    "react-native/scripts/react_native_pods.rb",
-    {paths: [process.argv[1]]},
-  )', __dir__]).strip
+def node_require(script)
+  require Pod::Executable.execute_command('node', ['-p',
+    "require.resolve(
+      '#{script}',
+      {paths: [process.argv[1]]},
+    )", __dir__]).strip
+end
+
+node_require('react-native/scripts/react_native_pods.rb')
+node_require('react-native-permissions/scripts/setup.rb')
 
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
+
+setup_permissions([
+  'Camera',
+  'LocationAccuracy',
+  'LocationAlways',
+  'LocationWhenInUse',
+  'MediaLibrary',
+  'PhotoLibrary',
+  'PhotoLibraryAddOnly',
+])
+
+# react-native-firebase resolves the Firebase SDK through SPM by default, but
+# firebase-ios-sdk's SPM products are automatic libraries, so with CocoaPods'
+# default static linkage each RNFB pod embeds its own copy and they collide as
+# duplicate symbols at link time. Resolve Firebase through CocoaPods instead.
+$RNFirebaseDisableSPM = true
 
 linkage = ENV['USE_FRAMEWORKS']
 if linkage != nil
@@ -14,8 +34,21 @@ if linkage != nil
   use_frameworks! :linkage => linkage.to_sym
 end
 
-target 'customerapp' do
+target 'ownerapp' do
   config = use_native_modules!
+
+  # The Firebase pods are Swift and import these Objective-C pods, which ship
+  # without module maps. Building as static libraries (CocoaPods' default here)
+  # a Swift pod can only import a dependency that defines a module, so these
+  # need module maps generated for them.
+  pod 'GoogleUtilities', :modular_headers => true
+  pod 'GoogleDataTransport', :modular_headers => true
+  pod 'PromisesObjC', :modular_headers => true
+  pod 'nanopb', :modular_headers => true
+  pod 'FirebaseCore', :modular_headers => true
+  pod 'FirebaseCoreInternal', :modular_headers => true
+  pod 'FirebaseCoreExtension', :modular_headers => true
+  pod 'FirebaseInstallations', :modular_headers => true
 
   use_react_native!(
     :path => config[:reactNativePath],
@@ -24,6 +57,7 @@ target 'customerapp' do
   )
 
   post_install do |installer|
+    $MLRN.post_install(installer) if defined?($MLRN)
     react_native_post_install(
       installer,
       config[:reactNativePath],

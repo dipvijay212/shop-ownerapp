@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar icon for push notifications. Android draws only the alpha
+     channel here, so it has to be a white silhouette — a full-colour icon
+     renders as a grey square.
+
+     This is the `o` from the Paasora wordmark, notch and dot included: the
+     full word is illegible at 24dp, but the notched ring is the distinctive
+     part of the mark. One even-odd path — outer, counter, notch, dot — so the
+     dot's crossing number is odd and it fills back in inside the notch. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M2.00,12.00 a10.00,9.90 0 1,0 20.00,0 a10.00,9.90 0 1,0 -20.00,0 Z M8.00,12.00 a4.00,4.79 0 1,0 8.00,0 a4.00,4.79 0 1,0 -8.00,0 Z M15.37,5.37 a2.19,2.19 0 1,0 4.37,0 a2.19,2.19 0 1,0 -4.37,0 Z M16.21,5.37 a1.35,1.35 0 1,0 2.70,0 a1.35,1.35 0 1,0 -2.70,0 Z" />
+</vector>

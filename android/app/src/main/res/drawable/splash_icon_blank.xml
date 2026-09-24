@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Android 12+ system splash always draws SOME icon; an empty vector makes
+     it fall back to the launcher icon. So hand it an opaque disc in the exact
+     splash background green: drawn, but indistinguishable from the backdrop. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/bootsplash_background" />
+    <size android:width="288dp" android:height="288dp" />
+</shape>

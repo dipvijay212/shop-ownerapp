@@ -1,135 +1,40 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// Owner auth service — a thin, screen-facing wrapper over the real API.
+//
+// Replaces the previous AsyncStorage mock. Verifying an OTP for an unknown
+// phone CREATES the owner account and returns is_new_user: true; the shop is
+// then built through the onboarding wizard (O-03 – O-06).
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const KEYS = {
-  TOKEN: 'owner_token',
-  PROFILE: 'owner_profile',
-  SHOP: 'owner_shop', // Shares the same key as mockOwnerData.js
-};
+import { api } from '../api';
+import { getRetryAfterSeconds } from '../api/errors';
+import { ApiError } from '../api/errors';
 
 export const ownerAuthService = {
-  /**
-   * Mock endpoint for POST /api/auth/owner/send-otp
-   */
-  sendOtp: async (phone) => {
-    await delay(1000); // Simulate network delay
-    console.log(`[ownerAuthService] Sending OTP to ${phone}`);
-    return { success: true };
-  },
+  // → { resend_in_sec, expires_in_sec }
+  sendOtp: async (phone) => api.auth.requestOtp(phone),
 
-  /**
-   * Mock endpoint for POST /api/auth/owner/verify-otp
-   */
-  verifyOtp: async (phone, otp) => {
-    await delay(1000); // Simulate network delay
+  // → { access_token, refresh_token, access_expires_in, is_new_user }
+  verifyOtp: async (phone, otp) => api.auth.verifyOtp(phone, otp),
 
-    if (otp !== '123456') {
-      const error = new Error('Invalid OTP');
-      error.response = { status: 400 };
+  getOwnerProfile: async () => api.auth.getOwnerProfile(),
+
+  // Step 1 of the wizard.
+  updateOwnerProfile: async (patch) => api.auth.updateOwnerProfile(patch),
+
+  // The shop drives every routing decision after login (§2.3). A brand-new
+  // owner has no shop at all, which the API reports as 404 — treat that as
+  // "start the wizard" rather than as an error.
+  getShop: async () => {
+    try {
+      return await api.shop.getShop();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     }
-
-    // Check if owner and shop exist in AsyncStorage
-    const storedOwner = await AsyncStorage.getItem(KEYS.PROFILE);
-    const storedShop = await AsyncStorage.getItem(KEYS.SHOP);
-
-    if (storedOwner && storedShop) {
-      // Existing owner
-      const owner = JSON.parse(storedOwner);
-      const shop = JSON.parse(storedShop);
-      const token = `mock-owner-jwt-token-for-${owner.id}`;
-      
-      return {
-        isNewUser: false,
-        token,
-        owner,
-        shop,
-      };
-    } else {
-      // New owner (must register shop and profile)
-      return {
-        isNewUser: true,
-        phone,
-      };
-    }
   },
 
-  /**
-   * Mock endpoint for POST /api/auth/owner/register
-   */
-  registerOwner: async ({ name, email, phone, shopName, shopPhone, shopAddress, shopCategory, shopLatitude, shopLongitude, shopBannerUrl, deliveryPolygon }) => {
-    await delay(1200); // Simulate network delay
+  logout: async (refreshToken) => api.auth.logout(refreshToken),
 
-    const ownerId = `owner_${Date.now()}`;
-    const shopId = 1; // Always matches Fresh Mart ID = 1
-
-    const newOwner = {
-      id: ownerId,
-      name,
-      email: email || '',
-      phone,
-      createdAt: new Date().toISOString(),
-    };
-
-    const newShop = {
-      id: shopId,
-      name: shopName,
-      phone: shopPhone || phone,
-      status: 'active',
-      banner_url: shopBannerUrl || 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=800',
-      address: shopAddress,
-      rating_avg: '5.0',
-      category: shopCategory || 'Groceries',
-      latitude: parseFloat(shopLatitude) || 21.2401,
-      longitude: parseFloat(shopLongitude) || 72.8735,
-      delivery_polygon: deliveryPolygon || [],
-      categories: [
-        { id: 1, name: 'Vegetables' },
-        { id: 2, name: 'Fruits' },
-        { id: 3, name: 'Dairy' },
-        { id: 4, name: 'Staples' },
-      ],
-    };
-
-    // Store in AsyncStorage
-    await AsyncStorage.setItem(KEYS.PROFILE, JSON.stringify(newOwner));
-    await AsyncStorage.setItem(KEYS.SHOP, JSON.stringify(newShop));
-    
-    const token = `mock-owner-jwt-token-for-${ownerId}`;
-    await AsyncStorage.setItem(KEYS.TOKEN, token);
-
-    return {
-      token,
-      owner: newOwner,
-      shop: newShop,
-    };
-  },
-
-  /**
-   * Mock endpoint for GET /api/auth/owner/me (validate token)
-   */
-  validateToken: async (token) => {
-    await delay(600); // Simulate network delay
-
-    if (!token || !token.startsWith('mock-owner-jwt-token-for-')) {
-      const error = new Error('Unauthorized');
-      error.response = { status: 401 };
-      throw error;
-    }
-
-    const storedOwner = await AsyncStorage.getItem(KEYS.PROFILE);
-    const storedShop = await AsyncStorage.getItem(KEYS.SHOP);
-
-    if (!storedOwner || !storedShop) {
-      const error = new Error('Profile not found');
-      error.response = { status: 404 };
-      throw error;
-    }
-
-    return {
-      owner: JSON.parse(storedOwner),
-      shop: JSON.parse(storedShop),
-    };
-  },
+  getRetryAfterSeconds,
 };
+
+export default ownerAuthService;

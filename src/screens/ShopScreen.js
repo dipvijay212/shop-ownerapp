@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Switch, ActivityIndicator, SafeAreaView, Platform, Animated, Dimensions } from 'react-native';
 import { Store, MapPin, Navigation, Star, ShieldAlert, BadgeCheck } from 'lucide-react-native';
-import { getMockShop, updateMockShopStatus, updateMockShopGeofence } from '../mockOwnerData';
+import { api } from '../api';
 import { AuthContext } from '../context/AuthContext';
 import { theme } from '../theme';
 import Toast from 'react-native-toast-message';
+import { formatShopCategories } from '../constants/shopCategories';
+import { useTranslation } from '../constants/translations';
 
 export const ShopScreen = () => {
-  const { shop, updateShopState } = useContext(AuthContext);
+  const { shop, refreshShop } = useContext(AuthContext);
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
 
   // Fallback states if context is empty
@@ -18,24 +21,23 @@ export const ShopScreen = () => {
   const fetchShopDetails = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getMockShop();
+      // GET /owner/shop is the authoritative record; refreshShop() also keeps
+      // AuthContext (and therefore navigation) in sync.
+      const data = await refreshShop();
       if (!isTogglingRef.current) {
         setLocalShop(data);
-        if (updateShopState && data.status !== shop?.status) {
-          updateShopState(data);
-        }
       }
     } catch (e) {
       console.error(e);
       Toast.show({
         type: 'error',
-        text1: 'Error',
-        text2: 'Could not load shop details.'
+        text1: t('errorTitle'),
+        text2: t('couldNotLoadShop')
       });
     } finally {
       setLoading(false);
     }
-  }, [updateShopState, shop]);
+  }, [refreshShop, t]);
 
   useEffect(() => {
     if (!shop) {
@@ -61,23 +63,16 @@ export const ShopScreen = () => {
     // Defer heavy storage operations so UI thread doesn't hang or stutter during transition
     setTimeout(async () => {
       try {
-        const res = await updateMockShopStatus(newStatus);
-        if (updateShopState) {
-          updateShopState(res);
-        }
-        Toast.show({
-          type: 'success',
-          text1: 'Shop Status Updated',
-          text2: `Your shop is now ${newStatus === 'active' ? 'Online' : 'Offline'}.`
-        });
+        await api.shop.setOnline(newStatus === 'active');
+        setLocalShop(await refreshShop());
       } catch (e) {
         console.error(e);
         // Revert local state
         setLocalShop({ ...localShop, status: currentOnline ? 'active' : 'inactive' });
         Toast.show({
           type: 'error',
-          text1: 'Error',
-          text2: 'Failed to update shop status.'
+          text1: t('errorTitle'),
+          text2: t('failedUpdateShopStatus')
         });
       } finally {
         setTimeout(() => {
@@ -104,22 +99,20 @@ export const ShopScreen = () => {
 
     setLoading(true);
     try {
-      const res = await updateMockShopGeofence(mockPolygon);
-      setLocalShop(res);
-      if (updateShopState) {
-        updateShopState(res);
-      }
+      // Radius is sent in METRES; 1.2 km around the storefront pin.
+      await api.shop.setDeliveryZone({ method: 'radius', radius_m: 1200 });
+      setLocalShop(await refreshShop());
       Toast.show({
         type: 'success',
-        text1: 'Delivery Zone Generated',
-        text2: 'Defined a 1.2km boundary around your storefront.'
+        text1: t('deliveryZoneGenerated'),
+        text2: t('deliveryZoneGeneratedSub')
       });
     } catch (e) {
       console.error(e);
       Toast.show({
         type: 'error',
-        text1: 'Error',
-        text2: 'Could not generate geofence.'
+        text1: t('errorTitle'),
+        text2: t('couldNotGenerateGeofence')
       });
     } finally {
       setLoading(false);
@@ -131,22 +124,19 @@ export const ShopScreen = () => {
 
     setLoading(true);
     try {
-      const res = await updateMockShopGeofence([]);
-      setLocalShop(res);
-      if (updateShopState) {
-        updateShopState(res);
-      }
+      await api.shop.setDeliveryZone({ method: 'radius', radius_m: 1000 });
+      setLocalShop(await refreshShop());
       Toast.show({
         type: 'success',
-        text1: 'Delivery Zone Cleared',
-        text2: 'Your delivery zone geofence has been reset.'
+        text1: t('deliveryZoneCleared'),
+        text2: t('deliveryZoneClearedSub')
       });
     } catch (e) {
       console.error(e);
       Toast.show({
         type: 'error',
-        text1: 'Error',
-        text2: 'Could not clear geofence.'
+        text1: t('errorTitle'),
+        text2: t('couldNotClearGeofence')
       });
     } finally {
       setLoading(false);
@@ -164,7 +154,7 @@ export const ShopScreen = () => {
   if (!localShop) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <Text style={styles.errorText}>No shop registered yet.</Text>
+        <Text style={styles.errorText}>{t('noShopRegistered')}</Text>
       </SafeAreaView>
     );
   }
@@ -197,8 +187,8 @@ export const ShopScreen = () => {
     <SafeAreaView style={styles.container}>
       {/* Title Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Shop Settings</Text>
-        <Text style={styles.subtitle}>Configure your customer storefront and geofencing</Text>
+        <Text style={styles.title}>{t('shopSettings')}</Text>
+        <Text style={styles.subtitle}>{t('shopSettingsSub')}</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContainer}>
@@ -214,7 +204,7 @@ export const ShopScreen = () => {
                   <Text style={styles.ratingText}>{localShop.rating_avg}</Text>
                 </View>
                 <View style={styles.categoryBadge}>
-                  <Text style={styles.categoryText}>{localShop.category.toUpperCase()}</Text>
+                  <Text style={styles.categoryText}>{formatShopCategories(localShop.category).toUpperCase()}</Text>
                 </View>
               </View>
             </View>
@@ -224,11 +214,11 @@ export const ShopScreen = () => {
         {/* Status Toggle Card */}
         <View style={styles.card}>
           <View style={{ marginBottom: 16 }}>
-            <Text style={styles.cardTitle}>Storefront Status</Text>
+            <Text style={styles.cardTitle}>{t('storefrontStatus', 'Storefront Status')}</Text>
             <Text style={styles.cardDescription}>
               {isOnline 
-                ? 'Your store is ONLINE and visible to neighbors.' 
-                : 'Your store is OFFLINE. Customers cannot place orders.'}
+                ? t('storeOnline', 'Your store is ONLINE and visible to neighbors.') 
+                : t('storeOffline', 'Your store is OFFLINE. Customers cannot place orders.')}
             </Text>
           </View>
 
@@ -288,20 +278,20 @@ export const ShopScreen = () => {
 
         {/* Details Card */}
         <View style={styles.card}>
-          <Text style={styles.sectionHeader}>Business Details</Text>
+          <Text style={styles.sectionHeader}>{t('businessDetailsLabel')}</Text>
           
           <View style={styles.detailRow}>
             <MapPin color={theme.colors.primary} size={22} style={styles.detailIcon} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.detailLabel}>Store Address</Text>
-              <Text style={styles.detailValue}>{localShop.address}</Text>
+              <Text style={styles.detailLabel}>{t('storeAddressLabel')}</Text>
+              <Text style={styles.detailValue}>{localShop?.address_line || localShop?.address || 'Not specified'}</Text>
             </View>
           </View>
 
           <View style={styles.detailRow}>
             <Navigation color={theme.colors.primary} size={22} style={styles.detailIcon} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.detailLabel}>Center Location coordinates</Text>
+              <Text style={styles.detailLabel}>{t('centerCoordinates')}</Text>
               <Text style={styles.detailValue}>
                 Lat: {localShop.latitude.toFixed(5)}, Lng: {localShop.longitude.toFixed(5)}
               </Text>
@@ -311,7 +301,7 @@ export const ShopScreen = () => {
 
         {/* Geofencing Card */}
         <View style={styles.card}>
-          <Text style={styles.sectionHeader}>Delivery Geofencing</Text>
+          <Text style={styles.sectionHeader}>{t('deliveryGeofencing')}</Text>
           <Text style={styles.cardDescription}>
             Define the geographical polygon boundary in which you offer home delivery.
           </Text>
@@ -320,7 +310,7 @@ export const ShopScreen = () => {
             <View style={styles.geofenceContainer}>
               <View style={styles.activeGeofenceHeader}>
                 <BadgeCheck color="#2E7D32" size={20} style={{ marginRight: 6 }} />
-                <Text style={styles.activeGeofenceTitle}>Geofence Active (4-point polygon)</Text>
+                <Text style={styles.activeGeofenceTitle}>{t('geofenceActive')}</Text>
               </View>
               <View style={styles.coordsList}>
                 {localShop.delivery_polygon.map((point, idx) => (
@@ -331,19 +321,19 @@ export const ShopScreen = () => {
               </View>
 
               <TouchableOpacity style={styles.clearGeofenceBtn} onPress={handleClearGeofence}>
-                <Text style={styles.clearGeofenceText}>Clear Delivery Zone</Text>
+                <Text style={styles.clearGeofenceText}>{t('clearDeliveryZone')}</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.noGeofenceContainer}>
               <ShieldAlert color="#FB8C00" size={24} style={{ marginBottom: 6 }} />
-              <Text style={styles.noGeofenceText}>No Active Geofence Zone Defined</Text>
+              <Text style={styles.noGeofenceText}>{t('noActiveGeofence')}</Text>
               <Text style={styles.noGeofenceSubtext}>
                 Deliveries are allowed everywhere by default. Set up a delivery boundary to restrict orders to nearby customers.
               </Text>
 
               <TouchableOpacity style={styles.generateGeofenceBtn} onPress={handleGenerateGeofence}>
-                <Text style={styles.generateGeofenceText}>Generate 1.2km Boundary</Text>
+                <Text style={styles.generateGeofenceText}>{t('generateBoundary')}</Text>
               </TouchableOpacity>
             </View>
           )}

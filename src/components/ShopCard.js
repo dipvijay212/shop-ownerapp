@@ -2,9 +2,11 @@ import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { theme } from '../theme';
 import { ChevronRight } from 'lucide-react-native';
+import { formatShopCategories } from '../constants/shopCategories';
 
 const ShopCard = ({ shop, onPress, distance, variant = 'large' }) => {
   const isOpen = shop.status === 'active'; 
+  const categoryText = formatShopCategories(shop.category);
 
   if (variant === 'list') {
     return (
@@ -22,7 +24,7 @@ const ShopCard = ({ shop, onPress, distance, variant = 'large' }) => {
           </View>
           
           <View style={styles.listMetaRow}>
-            <Text style={styles.listCategory}>{shop.category}</Text>
+            <Text style={styles.listCategory} numberOfLines={1}>{categoryText}</Text>
             {distance !== undefined && (
               <View style={styles.listDistanceContainer}>
                 <Text style={styles.listDistance}>{distance.toFixed(1)} km away</Text>
@@ -52,7 +54,7 @@ const ShopCard = ({ shop, onPress, distance, variant = 'large' }) => {
       
       <View style={styles.content}>
         <Text style={styles.name} numberOfLines={1}>{shop.name}</Text>
-        <Text style={styles.category}>{shop.category}</Text>
+        <Text style={styles.category} numberOfLines={1}>{categoryText}</Text>
       </View>
     </TouchableOpacity>
   );

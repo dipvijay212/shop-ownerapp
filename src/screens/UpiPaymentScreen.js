@@ -29,8 +29,8 @@ export const UpiPaymentScreen = ({ route, navigation }) => {
 
   const handleOpenUpiApp = () => {
     // In a real app, this would construct a upi://pay URI
-    // e.g. upi://pay?pa=${upiId}&pn=LocalShops&am=${total}&cu=INR&tn=Order_${orderNumber}
-    const upiUrl = `upi://pay?pa=${upiId}&pn=LocalShops&am=${total}&cu=INR&tn=Order_${orderNumber}`;
+    // e.g. upi://pay?pa=${upiId}&pn=Paasora&am=${total}&cu=INR&tn=Order_${orderNumber}
+    const upiUrl = `upi://pay?pa=${upiId}&pn=Paasora&am=${total}&cu=INR&tn=Order_${orderNumber}`;
     Linking.openURL(upiUrl).catch(() => {
       Alert.alert('No UPI App', 'Could not open UPI app on this device.');
     });

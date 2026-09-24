@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "955794817200",
+    "project_id": "paasora-dba3c",
+    "storage_bucket": "paasora-dba3c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:955794817200:android:61e73abbf2c67df638bb75",
+        "android_client_info": {
+          "package_name": "com.paasora"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxKEsaTbE7I5MY8lpfNO0oKi43ZpYAV70"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:955794817200:android:afd01f75aa385e0538bb75",
+        "android_client_info": {
+          "package_name": "com.paasora.partner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxKEsaTbE7I5MY8lpfNO0oKi43ZpYAV70"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

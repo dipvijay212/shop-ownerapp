@@ -1,11 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
+    <!-- Android 12+ draws a system splash on every cold start whether the app
+         asks for one or not, and it cannot be disabled — only made invisible.
+         Paint it the same brand green the JS SplashScreen uses, and hand it an
+         icon that is an opaque disc in that same green. Note the icon must be
+         opaque: a transparent or empty drawable reads as "no icon supplied" and
+         Android falls back to the launcher icon, which is the logo flash this
+         exists to remove. -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowBackground">@color/bootsplash_background</item>
+        <item name="android:windowSplashScreenBackground">@color/bootsplash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_blank</item>
+    </style>
+
     <style name="BootTheme" parent="Theme.BootSplash">
         <item name="bootSplashBackground">@color/bootsplash_background</item>
-        <item name="bootSplashLogo">@drawable/transparent_icon</item>
+        <item name="bootSplashLogo">@drawable/transparent_pixel</item>
         <item name="android:windowSplashScreenBackground">@color/bootsplash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_icon</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">@color/bootsplash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_blank</item>
         <item name="postBootSplashTheme">@style/AppTheme</item>
     </style>
 </resources>

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import {
   View,
   Text,
@@ -15,49 +15,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Globe, ArrowRight, Check, Sparkles } from 'lucide-react-native';
 import { theme } from '../../theme';
+import { AuthContext } from '../../context/AuthContext';
+import { SUPPORTED_LANGUAGES } from '../../constants/translations';
+import { useTranslation } from '../../constants/translations';
 
-const LANGUAGES = [
-  {
-    id: 'en',
-    name: 'English',
-    nativeName: 'English',
-    symbol: 'A',
-    description: 'Select English as your primary app language',
-    greeting: 'Welcome to Local Shops',
-    subGreeting: 'Select your preferred language to manage your store effortlessly',
-    continueText: 'Continue in English',
-    badge: 'Default',
-  },
-  {
-    id: 'hi',
-    name: 'Hindi',
-    nativeName: 'हिन्दी',
-    symbol: 'अ',
-    description: 'अपनी प्राथमिक ऐप भाषा के रूप में हिंदी चुनें',
-    greeting: 'लोकल शॉप्स में आपका स्वागत है',
-    subGreeting: 'अपनी दुकान का सरलता से प्रबंधन करने के लिए अपनी पसंदीदा भाषा चुनें',
-    continueText: 'आगे बढ़ें (Continue in Hindi)',
-    badge: 'लोकप्रिय',
-  },
-  {
-    id: 'gu',
-    name: 'Gujarati',
-    nativeName: 'ગુજરાતી',
-    symbol: 'અ',
-    description: 'તમારી પ્રાથમિક એપ ભાષા તરીકે ગુજરાતી પસંદ કરો',
-    greeting: 'લોકલ શૉપ્સમાં તમારું સ્વાગત છે',
-    subGreeting: 'તમારી દુકાનનું સરનામું અને વેપાર સંચાલન કરવા માટે તમારી પસંદગીની ભાષા પસંદ કરો',
-    continueText: 'આગળ વધો (Continue in Gujarati)',
-    badge: 'લોકપ્રિય',
-  },
-];
+const LANGUAGES = SUPPORTED_LANGUAGES;
 
-export const LanguageSelectScreen = () => {
+export const LanguageSelectScreen = ({ route }) => {
+  const { t } = useTranslation();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [selectedLang, setSelectedLang] = useState('en');
+  const { appLanguage, setAppLanguage } = useContext(AuthContext);
+  const [selectedLang, setSelectedLang] = useState(appLanguage || 'en');
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(15)).current;
+
+  const isNewUser = route?.params?.isNewUser;
+  const phone = route?.params?.phone;
+  const authPayload = route?.params?.authPayload;
 
   useEffect(() => {
     Animated.parallel([
@@ -78,21 +53,34 @@ export const LanguageSelectScreen = () => {
 
   const handleContinue = async () => {
     try {
-      await AsyncStorage.setItem('owner_preferred_language', selectedLang);
+      if (setAppLanguage) {
+        await setAppLanguage(selectedLang);
+      } else {
+        await AsyncStorage.setItem('owner_preferred_language', selectedLang);
+      }
     } catch (error) {
       console.log('Error saving language preference:', error);
     }
-    navigation.navigate('Login');
+
+    if (isNewUser || authPayload) {
+      navigation.navigate('RegisterShop', { phone, authPayload });
+    } else {
+      navigation.navigate('Login');
+    }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
       <Animated.View
         style={[
           styles.contentContainer,
-          { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+          {
+            paddingTop: Platform.OS === 'ios' ? insets.top : 0,
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          },
         ]}
       >
         {/* Dynamic Header Section */}
@@ -158,7 +146,7 @@ export const LanguageSelectScreen = () => {
         </ScrollView>
 
         {/* Sticky Bottom Action */}
-        <View style={[styles.footerSection, { paddingBottom: Math.max(insets.bottom + 16, 28) }]}>
+        <View style={[styles.footerSection, { paddingBottom: Platform.OS === 'ios' ? Math.max(insets.bottom + 12, 24) : 20 }]}>
           <TouchableOpacity
             style={styles.continueButton}
             activeOpacity={0.85}
@@ -171,11 +159,11 @@ export const LanguageSelectScreen = () => {
           </TouchableOpacity>
 
           <Text style={styles.footerNote}>
-            You can always change your language later in App Settings
+            {t('changeLanguageLater')}
           </Text>
         </View>
       </Animated.View>
-    </SafeAreaView>
+    </View>
   );
 };
 

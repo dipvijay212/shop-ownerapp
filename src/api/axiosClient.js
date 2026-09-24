@@ -3,12 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
 import { getMockSavedShops, removeMockSavedShop, reorderMockSavedShops, getMockShops, getMockShop, getMockProducts, getMockCarts, updateMockCart, getMockAddresses, addMockAddress, updateMockAddress, deleteMockAddress, getMockOrders, addMockOrder, getMockUdharLedger, getMockWishlist, toggleMockWishlist } from './mockData';
 
-// Use the dev tunnel URL provided by the user
-const BASE_URL = 'https://8d9tvlgb-5000.inc1.devtunnels.ms/api';
+import { API_BASE_URL } from './config';
 
 const axiosClient = axios.create({
-  baseURL: BASE_URL,
+  baseURL: API_BASE_URL,
   timeout: 10000,
+  headers: {
+    'X-Tunnel-Skip-Anti-Phishing-Page': 'true',
+  },
 });
 
 axiosClient.interceptors.request.use(

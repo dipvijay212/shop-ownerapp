@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Mock data for Local Shops app — 10 shops across 6 categories, with
+// Mock data for the Paasora Partner app — 10 shops across 6 categories, with
 // realistic per-shop product catalogs. Drop-in replacement for the existing
 // mockData.js — all exported function signatures are unchanged.
 // ---------------------------------------------------------------------------

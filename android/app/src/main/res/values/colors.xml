@@ -1,3 +1,5 @@
 <resources>
-    <color name="bootsplash_background">#faf9f6</color>
+    <color name="bootsplash_background">#16A34A</color>
+    <!-- Tints the small icon and app name in the notification shade. -->
+    <color name="notification_color">#16A34A</color>
 </resources>

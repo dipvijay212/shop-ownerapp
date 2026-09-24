@@ -1,7 +1,10 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  <!-- Android 13+ shows nothing from FCM until the user grants this at runtime. -->
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
   <application
     android:name=".MainApplication"
@@ -10,11 +13,25 @@
     android:roundIcon="@mipmap/ic_launcher_round"
     android:allowBackup="false"
     android:theme="@style/AppTheme"
-    android:usesCleartextTraffic="${usesCleartextTraffic}"
+    android:usesCleartextTraffic="true"
     android:supportsRtl="true">
     <meta-data
       android:name="com.google.android.geo.API_KEY"
-      android:value="DUMMY_API_KEY_FOR_TESTING" />
+      android:value="AIzaSyDIwYwdAMQc_xip8vWGD7fDyT1YKppL1xs" />
+    <!-- Push icon and accent colour. Declared HERE, not in firebase.json:
+         firebase.json injects the same meta-data into the react-native-firebase
+         messaging LIBRARY's manifest, and that module cannot resolve a colour
+         that lives in the app, so `verifyReleaseResources` failed every release
+         build with "resource color/notification_color not found". The app
+         resolves its own resources fine. The default channel stays in
+         firebase.json, which needs no resource lookup. -->
+    <meta-data
+      android:name="com.google.firebase.messaging.default_notification_icon"
+      android:resource="@drawable/ic_notification" />
+    <meta-data
+      android:name="com.google.firebase.messaging.default_notification_color"
+      android:resource="@color/notification_color"
+      tools:replace="android:resource" />
     <activity
       android:name=".MainActivity"
       android:label="@string/app_name"
@@ -22,7 +39,7 @@
       android:launchMode="singleTask"
       android:windowSoftInputMode="adjustResize"
       android:exported="true"
-      android:theme="@style/BootTheme">
+      android:theme="@style/AppTheme">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />

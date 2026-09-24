@@ -10,16 +10,19 @@ import {
   Platform, 
   SafeAreaView, 
   Animated, 
-  Pressable 
+  Pressable,
+  StatusBar
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
 import { ownerAuthService } from '../../services/ownerAuthService';
+import { saveTokens } from '../../api/session';
 import { AuthContext } from '../../context/AuthContext';
 import Toast from 'react-native-toast-message';
 import { ArrowLeft, ShieldCheck, ArrowRight, ShieldAlert, Sparkles, Lock } from 'lucide-react-native';
+import { useTranslation } from '../../constants/translations';
 
 export const VerifyOTPScreen = () => {
   const navigation = useNavigation();
@@ -27,7 +30,8 @@ export const VerifyOTPScreen = () => {
   const { phone } = route.params || { phone: '' };
   const insets = useSafeAreaInsets();
   
-  const { login } = useContext(AuthContext);
+  const { login, languageChosen } = useContext(AuthContext);
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(30);
   
@@ -127,8 +131,8 @@ export const VerifyOTPScreen = () => {
     if (!otpCode || otpCode.length < 6) {
       Toast.show({
         type: 'error',
-        text1: 'Verification Incomplete',
-        text2: 'Please enter the complete 6-digit OTP code.'
+        text1: t('verificationIncomplete'),
+        text2: t('enterComplete6Digit')
       });
       triggerShake();
       return;
@@ -137,53 +141,85 @@ export const VerifyOTPScreen = () => {
     setLoading(true);
     try {
       const res = await ownerAuthService.verifyOtp(phone, otpCode);
-      
-      if (res.isNewUser) {
+
+      // Save token pair so API calls are properly authenticated
+      await saveTokens(res);
+
+      // Check if owner already has a shop created
+      const existingShop = await ownerAuthService.getShop().catch(() => null);
+      if (res.is_new_user && !existingShop) {
+        // A new account still needs to register a shop — but the language
+        // picker is a DEVICE setup step, not part of signing up. Once this
+        // phone has a language, a second owner signing in on it inherits that
+        // language and should go straight to registration.
+        if (languageChosen) {
+          navigation.navigate('RegisterShop', { phone, authPayload: res });
+        } else {
+          navigation.navigate('LanguageSelect', { phone, authPayload: res, isNewUser: true });
+        }
+        return;
+      }
+
+      // Returning owner: login() loads the shop first, so the navigator lands
+      // on the right screen for its verification status (§2.3). The code was
+      // already accepted at this point, so a failure here is a shop-load
+      // problem — reporting it as "invalid code" would send the owner off to
+      // re-request an OTP that was never the issue.
+      try {
+        await login(res);
+      } catch (loadError) {
         Toast.show({
-          type: 'success',
-          text1: 'Verification Successful',
-          text2: 'Let\'s register your shop catalog.'
+          type: 'error',
+          text1: t('couldNotLoadYourShop'),
+          text2: loadError.message || 'Please check your connection and try again.',
         });
-        navigation.navigate('RegisterShop', { phone });
-      } else {
-        await login(res.token, res.owner, res.shop);
-        Toast.show({
-          type: 'success',
-          text1: 'Authentication Verified',
-          text2: `Welcome back, ${res.owner.name}.`
-        });
+        return;
       }
     } catch (e) {
-      console.error('OTP Verification Error', e);
-      Toast.show({
-        type: 'error',
-        text1: 'Verification Failed',
-        text2: 'The code you entered is invalid. Try 123456.'
-      });
+      if (e.isThrottled) {
+        const wait = ownerAuthService.getRetryAfterSeconds(e) || 60;
+        setTimer(wait);
+        Toast.show({
+          type: 'error',
+          text1: t('tooManyAttempts'),
+          text2: `Please wait ${wait}s before trying again.`,
+        });
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: t('verificationFailedTitle'),
+          text2: e.message || 'The code you entered is invalid.',
+        });
+      }
+      setOtpArray(['', '', '', '', '', '']);
+      inputRefs.current[0]?.focus();
       triggerShake();
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResend = () => {
-    setTimer(30);
-    setOtpArray(['', '', '', '', '', '']);
-    inputRefs.current[0]?.focus();
-    Toast.show({
-      type: 'success',
-      text1: 'OTP Sent Again',
-      text2: 'Enter verification OTP to verify number.'
-    });
+  const handleResend = async () => {
+    try {
+      const res = await ownerAuthService.sendOtp(phone);
+      setTimer(res?.resend_in_sec || 25);
+      setOtpArray(['', '', '', '', '', '']);
+      inputRefs.current[0]?.focus();
+      Toast.show({ type: 'success', text1: t('otpResent') });
+    } catch (e) {
+      setTimer(ownerAuthService.getRetryAfterSeconds(e) || 30);
+      Toast.show({ type: 'error', text1: t('couldNotResend'), text2: e.message });
+    }
   };
 
   const formattedPhone = phone ? `+91 ${phone.slice(0, 5)} ${phone.slice(5)}` : '+91 98765 43210';
   const isButtonEnabled = otpArray.every(char => char !== '') && !loading;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       {/* Top Navigator Row */}
-      <View style={[styles.topNavRow, { paddingTop: insets.top > 0 ? insets.top + 8 : 16 }]}>
+      <View style={[styles.topNavRow, { paddingTop: Platform.OS === 'ios' ? insets.top + 16 : Math.max(insets.top, StatusBar.currentHeight || 24) + 12 }]}>
         <TouchableOpacity 
           style={styles.backBtn}
           onPress={() => navigation.goBack()}
@@ -202,7 +238,7 @@ export const VerifyOTPScreen = () => {
               <Text style={styles.stepInactiveText}>2</Text>
             </View>
           </View>
-          <Text style={styles.timelineText}>Step 2 of 2</Text>
+          <Text style={styles.timelineText}>{t('step2of2', 'Step 2 of 2')}</Text>
         </View>
       </View>
 
@@ -255,8 +291,8 @@ export const VerifyOTPScreen = () => {
 
             {/* Header titles */}
             <View style={styles.header}>
-              <Text style={styles.title}>Verify Your Number</Text>
-              <Text style={styles.subtitle}>Enter the 6-digit code sent to</Text>
+              <Text style={styles.title}>{t('verifyYourNumber', 'Verify Your Number')}</Text>
+              <Text style={styles.subtitle}>{t('enterCodeSentTo', 'Enter the 6-digit code sent to')}</Text>
               <Text style={styles.targetPhone}>{formattedPhone}</Text>
             </View>
 
@@ -293,16 +329,16 @@ export const VerifyOTPScreen = () => {
               <View style={styles.timerLinkRow}>
                 {timer > 0 ? (
                   <Text style={styles.timerText}>
-                    Resend code in <Text style={styles.timerGreen}>00:{timer < 10 ? `0${timer}` : timer}</Text>
+                    {t('resendCodeIn', 'Resend code in')} <Text style={styles.timerGreen}>00:{timer < 10 ? `0${timer}` : timer}</Text>
                   </Text>
                 ) : (
                   <TouchableOpacity onPress={handleResend}>
-                    <Text style={styles.resendActionLink}>Resend OTP</Text>
+                    <Text style={styles.resendActionLink}>{t('resendOtp', 'Resend OTP')}</Text>
                   </TouchableOpacity>
                 )}
                 
                 <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-                  <Text style={styles.changeNumLink}>Change Number</Text>
+                  <Text style={styles.changeNumLink}>{t('changeNumber', 'Change Number')}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -312,9 +348,9 @@ export const VerifyOTPScreen = () => {
                   <Text style={styles.devCodeSymbol}>&gt;_</Text>
                 </View>
                 <View style={styles.devTextSection}>
-                  <Text style={styles.devCardTitle}>Development Mode</Text>
+                  <Text style={styles.devCardTitle}>{t('developmentMode', 'Development Mode')}</Text>
                   <View style={styles.devOtpContainer}>
-                    <Text style={styles.devCardText}>Use OTP:</Text>
+                    <Text style={styles.devCardText}>{t('useOtp', 'Use OTP:')}</Text>
                     <View style={styles.devOtpBadge}>
                       <Text style={styles.devOtpBadgeText}>123456</Text>
                     </View>
@@ -324,10 +360,10 @@ export const VerifyOTPScreen = () => {
                   style={styles.devCopyBtn}
                   onPress={() => {
                     setOtpArray(['1', '2', '3', '4', '5', '6']);
-                    Toast.show({ type: 'success', text1: 'OTP Filled', text2: 'Sandbox OTP filled successfully!' });
+                    Toast.show({ type: 'success', text1: t('otpFilled'), text2: t('otpFilledSub') });
                   }}
                 >
-                  <Text style={styles.devCopyText}>Fill</Text>
+                  <Text style={styles.devCopyText}>{t('fillBtn', 'Fill')}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -347,7 +383,7 @@ export const VerifyOTPScreen = () => {
                     <ActivityIndicator color="#FFF" size="small" />
                   ) : (
                     <View style={styles.buttonInner}>
-                      <Text style={styles.buttonText}>Verify & Continue</Text>
+                      <Text style={styles.buttonText}>{t('verifyAndContinue', 'Verify & Continue')}</Text>
                       <ArrowRight color="#FFF" size={18} strokeWidth={2.5} style={styles.buttonArrow} />
                     </View>
                   )}
@@ -360,14 +396,14 @@ export const VerifyOTPScreen = () => {
             <View style={styles.securitySealRow}>
               <ShieldCheck color="#16A34A" size={16} style={{ marginRight: 6 }} />
               <Text style={styles.securitySealText}>
-                Your account is protected with <Text style={styles.securitySealGreen}>256-bit encryption</Text>
+                {t('accountProtected', 'Your account is protected with 256-bit encryption')}
               </Text>
             </View>
 
           </Animated.View>
         </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 };
 

@@ -1,21 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useContext } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Platform, StatusBar, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { ArrowLeft, Check } from 'lucide-react-native';
 import { theme } from '../theme';
+import { AuthContext } from '../context/AuthContext';
+import Toast from 'react-native-toast-message';
+import { SUPPORTED_LANGUAGES, getTranslation } from '../constants/translations';
+import { useScreenPadding } from '../hooks/useScreenPadding';
 
 export const LanguageSettingsScreen = () => {
   const navigation = useNavigation();
-  const [selectedLang, setSelectedLang] = useState('en');
+  const { appLanguage, setAppLanguage } = useContext(AuthContext);
+  const [selectedLang, setSelectedLang] = useState(appLanguage || 'en');
 
-  const languages = [
-    { id: 'en', name: 'English', nativeName: 'English' },
-    { id: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
-    { id: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી' },
-  ];
+  const languages = SUPPORTED_LANGUAGES;
 
-  const handleSave = () => {
-    // In a real app, save to async storage, update context/i18n instance
+  const handleSave = async () => {
+    try {
+      if (setAppLanguage) {
+        await setAppLanguage(selectedLang);
+      }
+      Toast.show({
+        type: 'success',
+        text1: getTranslation(selectedLang, 'languageSavedSuccess'),
+        text2: getTranslation(selectedLang, 'appLanguageUpdated'),
+      });
+    } catch (e) {
+      console.error(e);
+    }
     navigation.goBack();
   };
 
@@ -46,12 +58,12 @@ export const LanguageSettingsScreen = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <ArrowLeft color="#1A1A1A" size={24} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Language Settings</Text>
+        <Text style={styles.headerTitle}>{getTranslation(selectedLang, 'languageSettings')}</Text>
         <View style={{ width: 24 }} />
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.instruction}>Select your preferred language</Text>
+        <Text style={styles.instruction}>{getTranslation(selectedLang, 'selectPreferredLanguage')}</Text>
         
         <FlatList
           data={languages}
@@ -63,7 +75,7 @@ export const LanguageSettingsScreen = () => {
 
       <View style={styles.footer}>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-          <Text style={styles.saveBtnText}>Save Language</Text>
+          <Text style={styles.saveBtnText}>{getTranslation(selectedLang, 'saveLanguage')}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

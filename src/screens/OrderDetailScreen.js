@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigation } from '@react-navigation/native';
 import axiosClient from '../api/axiosClient';
 import { theme } from '../theme';
-import { Menu, Phone, CheckCircle2, Circle, Clock, MapPin, Truck, ShieldCheck, ChevronRight } from 'lucide-react-native';
+import { Menu, Phone, CheckCircle2, Circle, Clock, MapPin, Truck, ShieldCheck, ChevronRight, Repeat } from 'lucide-react-native';
 
 export const OrderDetailScreen = ({ route }) => {
   const { id } = route.params;
@@ -118,7 +118,7 @@ export const OrderDetailScreen = ({ route }) => {
         <TouchableOpacity style={{padding: 4}} onPress={() => navigation.goBack()}>
           <Menu color="#006B54" size={26} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Local Shops</Text>
+        <Text style={styles.headerTitle}>Paasora</Text>
         <View style={styles.avatarContainer}>
           <Image source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' }} style={styles.avatar} />
         </View>
@@ -173,14 +173,29 @@ export const OrderDetailScreen = ({ route }) => {
           <View style={styles.orderItemsList}>
             {(order.items || []).map(item => (
               <View key={item.id} style={styles.orderItem}>
-                <Image source={{uri: item.image_url || 'https://via.placeholder.com/60'}} style={styles.orderItemImg} />
+                <Image source={{uri: item.image_url || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400'}} style={styles.orderItemImg} />
                 <View style={styles.orderItemInfo}>
                   <Text style={styles.orderItemName} numberOfLines={2}>{item.name}</Text>
                   <Text style={styles.orderItemQty}>{item.unit}</Text>
+                  {item.kind === 'both' && (
+                    <View style={styles.kindBadgeBoth}>
+                      <Repeat size={10} color="#047857" style={{ marginRight: 3 }} />
+                      <Text style={styles.kindBadgeTextBoth}>Subscription + Normal</Text>
+                    </View>
+                  )}
+                  {item.kind === 'subscription' && (
+                    <View style={styles.kindBadgeSub}>
+                      <Repeat size={10} color="#7C3AED" style={{ marginRight: 3 }} />
+                      <Text style={styles.kindBadgeTextSub}>Subscription only</Text>
+                    </View>
+                  )}
                 </View>
                 <View style={{alignItems: 'flex-end'}}>
                   <Text style={styles.orderItemPrice}>₹{(item.price * item.quantity).toFixed(2)}</Text>
-                  <Text style={styles.orderItemQtyRight}>Qty: {item.quantity}</Text>
+                  {/* Server-formatted, so a loose line reads "1 kg" rather than 1000. */}
+                  <Text style={styles.orderItemQtyRight}>
+                    {item.quantity_label || `Qty: ${item.quantity}`}
+                  </Text>
                 </View>
               </View>
             ))}
@@ -534,7 +549,37 @@ const styles = StyleSheet.create({
     ...theme.typography.caption,
     color: theme.colors.textLight,
     lineHeight: 18,
-  }
+  },
+  kindBadgeBoth: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 3,
+  },
+  kindBadgeTextBoth: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  kindBadgeSub: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EDE9FE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 3,
+  },
+  kindBadgeTextSub: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7C3AED',
+  },
 });
 
 export default OrderDetailScreen;

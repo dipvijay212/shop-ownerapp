@@ -1,16 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TextInput, 
-  TouchableOpacity, 
-  ActivityIndicator, 
-  KeyboardAvoidingView, 
-  Platform, 
-  SafeAreaView, 
-  Animated, 
-  Pressable 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  Animated,
+  Pressable,
+  StatusBar
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useNavigation } from '@react-navigation/native';
@@ -18,14 +19,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
 import { ownerAuthService } from '../../services/ownerAuthService';
 import Toast from 'react-native-toast-message';
-import { Smartphone, Store, ShieldCheck, ChevronRight } from 'lucide-react-native';
+import { Smartphone, Store, ShieldCheck, ChevronRight, MapPin, ArrowRight, Lock } from 'lucide-react-native';
+import { useTranslation } from '../../constants/translations';
 
 export const LoginScreen = () => {
   const navigation = useNavigation();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const [phoneError, setPhoneError] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -56,30 +60,28 @@ export const LoginScreen = () => {
   };
 
   const handleSendOtp = async () => {
+    // One field, so there is nothing to scroll to — but the message belongs
+    // under the input rather than in a toast that slides away.
     if (!phone || phone.length < 10) {
-      Toast.show({
-        type: 'error',
-        text1: 'Invalid Number',
-        text2: 'Please enter a valid 10-digit phone number.'
-      });
+      setPhoneError(t('phoneTenDigits', 'Enter your 10-digit mobile number.'));
       return;
     }
+    setPhoneError('');
 
     setLoading(true);
     try {
-      await ownerAuthService.sendOtp(phone);
-      Toast.show({
-        type: 'success',
-        text1: 'Code Sent',
-        text2: 'Verification code sent to +91 ' + phone
+      const res = await ownerAuthService.sendOtp(phone);
+      navigation.navigate('VerifyOTP', {
+        phone,
+        resendInSec: res?.resend_in_sec,
       });
-      navigation.navigate('VerifyOTP', { phone });
     } catch (e) {
-      console.error('OTP Send Error', e);
       Toast.show({
         type: 'error',
-        text1: 'Error',
-        text2: 'Failed to send OTP.'
+        text1: e.isThrottled ? 'Too many attempts' : 'Error',
+        text2: e.isThrottled
+          ? `Please wait ${ownerAuthService.getRetryAfterSeconds(e) || 60}s before trying again.`
+          : e.message || 'Failed to send OTP.',
       });
     } finally {
       setLoading(false);
@@ -89,12 +91,12 @@ export const LoginScreen = () => {
   const isButtonEnabled = phone.length === 10 && !loading;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
+    <View style={styles.container}>
+      <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <KeyboardAwareScrollView 
+        <KeyboardAwareScrollView
           contentContainerStyle={styles.keyboardView}
           enableOnAndroid={true}
           enableAutomaticScroll={true}
@@ -104,83 +106,58 @@ export const LoginScreen = () => {
             styles.contentContainer,
             { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
           ]}>
-            
-            {/* Header row with logo and shop illustration */}
-            <View style={[styles.headerContainer, { paddingTop: insets.top > 0 ? insets.top + 8 : 16 }]}>
-              <View style={styles.headerTextSection}>
-                <View style={styles.logoBox}>
-                  <Store color="#16A34A" size={26} strokeWidth={2.5} />
+
+            {/* Header section matching reference screen design */}
+            <View style={[styles.headerContainer, { paddingTop: Platform.OS === 'ios' ? insets.top + 16 : Math.max(insets.top, StatusBar.currentHeight || 24) + 16 }]}>
+              {/* Location Pin Logo with Store icon */}
+              <View style={styles.logoBadgeContainer}>
+                <View style={styles.pinIconWrapper}>
+                  <MapPin color="#16A34A" size={92} fill="#ECFDF5" strokeWidth={1.8} />
+                  <View style={styles.pinStoreIcon}>
+                    <Store color="#16A34A" size={32} strokeWidth={2.4} />
+                  </View>
                 </View>
-                <Text style={styles.welcomeText}>Welcome to</Text>
-                <Text style={styles.portalTitle}>Partner Portal</Text>
-                <View style={styles.sloganRow}>
-                  <Text style={styles.sloganText}>Helping local shops grow</Text>
-                  <Text style={styles.heartEmoji}>💚</Text>
-                </View>
+                <Text style={styles.brandTitleText}>
+                  Near<Text style={styles.brandTitleHighlight}>Kart</Text>
+                </Text>
               </View>
 
-              {/* Styled Shop Illustration */}
-              <View style={styles.shopIllustration}>
-                {/* Awning/Roof */}
-                <View style={styles.awningContainer}>
-                  <View style={styles.awning}>
-                    <View style={[styles.stripe, { backgroundColor: '#15803D' }]} />
-                    <View style={[styles.stripe, { backgroundColor: '#DCFCE7' }]} />
-                    <View style={[styles.stripe, { backgroundColor: '#15803D' }]} />
-                    <View style={[styles.stripe, { backgroundColor: '#DCFCE7' }]} />
-                    <View style={[styles.stripe, { backgroundColor: '#15803D' }]} />
-                    <View style={[styles.stripe, { backgroundColor: '#DCFCE7' }]} />
-                  </View>
-                  {/* Scallops Scalloped Awning Effect */}
-                  <View style={styles.scallopsRow}>
-                    <View style={[styles.scallop, { backgroundColor: '#15803D' }]} />
-                    <View style={[styles.scallop, { backgroundColor: '#DCFCE7' }]} />
-                    <View style={[styles.scallop, { backgroundColor: '#15803D' }]} />
-                    <View style={[styles.scallop, { backgroundColor: '#DCFCE7' }]} />
-                    <View style={[styles.scallop, { backgroundColor: '#15803D' }]} />
-                    <View style={[styles.scallop, { backgroundColor: '#DCFCE7' }]} />
-                  </View>
-                </View>
-                {/* Wall */}
-                <View style={styles.shopWall}>
-                  <View style={styles.shopDoor} />
-                  <View style={styles.openBadge}>
-                    <Text style={styles.openBadgeText}>OPEN</Text>
-                  </View>
-                </View>
-                {/* Trees/Bushes */}
-                <View style={styles.bushLeft} />
-                <View style={styles.bushRight} />
-              </View>
+              {/* Title & Subtitle */}
+              <Text style={styles.welcomeText}>{t('loginTitle', 'Welcome to NearKart')}</Text>
+              <Text style={styles.subheadText}>{t('loginSubtitle', 'Shop from your trusted nearby stores.')}</Text>
             </View>
 
-            {/* Input Card Container */}
+            {/* Input Card Container (Kept as requested) */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Enter your mobile number</Text>
-              <Text style={styles.cardSubtitle}>We'll send a verification code to this number</Text>
+              <Text style={styles.cardTitle}>{t('enterMobileNumber', 'Enter your mobile number')}</Text>
+              <Text style={styles.cardSubtitle}>{t('verificationCodeNotice', "We'll send a verification code to this number")}</Text>
 
               {/* Country Picker & Input Row */}
               <View style={[
                 styles.inputRow,
-                isFocused && styles.inputRowFocused
+                isFocused && styles.inputRowFocused,
+                !!phoneError && styles.inputRowError
               ]}>
                 <View style={styles.countryPicker}>
                   <Text style={styles.flagEmoji}>🇮🇳</Text>
                   <Text style={styles.countryCode}>+91</Text>
                   <View style={styles.chevronDown} />
                 </View>
-                
+
                 <View style={styles.verticalDivider} />
 
                 <TextInput
                   style={styles.textInput}
-                  placeholder="Enter mobile number"
+                  placeholder={t('mobilePlaceholder', 'Enter mobile number')}
                   placeholderTextColor="#94A3B8"
                   keyboardType="phone-pad"
                   multiline={false}
                   numberOfLines={1}
                   value={phone}
-                  onChangeText={(val) => setPhone(val.replace(/[^0-9]/g, '').slice(0, 10))}
+                  onChangeText={(val) => {
+                    setPhone(val.replace(/[^0-9]/g, '').slice(0, 10));
+                    if (phoneError) setPhoneError('');
+                  }}
                   maxLength={10}
                   onFocus={() => setIsFocused(true)}
                   onBlur={() => setIsFocused(false)}
@@ -189,10 +166,12 @@ export const LoginScreen = () => {
                 <Smartphone color="#16A34A" size={18} style={{ alignSelf: 'center', marginRight: 12 }} />
               </View>
 
+              {!!phoneError && <Text style={styles.fieldErrorText}>{phoneError}</Text>}
+
               {/* Security Banner inside Card */}
               <View style={styles.securityBanner}>
                 <ShieldCheck color="#16A34A" size={15} style={{ marginRight: 6 }} />
-                <Text style={styles.securityBannerText}>Your information is safe and secure</Text>
+                <Text style={styles.securityBannerText}>{t('safeAndSecure', 'Your information is safe and secure')}</Text>
               </View>
 
               {/* Primary Button */}
@@ -211,8 +190,8 @@ export const LoginScreen = () => {
                     <ActivityIndicator color="#FFF" size="small" />
                   ) : (
                     <View style={styles.buttonInner}>
-                      <Text style={styles.buttonText}>Continue</Text>
-                      <ChevronRight color="#FFF" size={18} strokeWidth={2.5} style={styles.buttonChevron} />
+                      <Text style={styles.buttonText}>{t('continueBtn', 'Continue')}</Text>
+                      <ArrowRight color="#FFF" size={20} strokeWidth={2.5} style={styles.buttonChevron} />
                     </View>
                   )}
                 </Animated.View>
@@ -220,43 +199,53 @@ export const LoginScreen = () => {
             </View>
 
             {/* Legalese Footer Links */}
-            <Text style={styles.legaleseText}>
-              By continuing, you agree to our{' '}
-              <Text 
-                style={styles.legaleseLink} 
-                onPress={() => Toast.show({ type: 'info', text1: 'Terms & Conditions', text2: 'Open Terms of Service' })}
-              >
-                Terms & Conditions
-              </Text>{' '}
-              and{' '}
-              <Text 
-                style={styles.legaleseLink}
-                onPress={() => Toast.show({ type: 'info', text1: 'Privacy Policy', text2: 'Open Privacy documentation' })}
-              >
-                Privacy Policy
+            <View style={styles.legaleseContainer}>
+              <Lock color="#64748B" size={16} style={{ marginRight: 6, marginTop: 1 }} />
+              <Text style={styles.legaleseText}>
+                {t('legalPrefix')}{' '}
+                <Text
+                  style={styles.legaleseLink}
+                  onPress={() => Toast.show({ type: 'info', text1: t('termsConditions'), text2: t('openTermsOfService') })}
+                >
+                  {t('termsOfService')}
+                </Text>{' '}
+                {t('legalAnd')}{' '}
+                <Text
+                  style={styles.legaleseLink}
+                  onPress={() => Toast.show({ type: 'info', text1: t('privacyPolicyLabel'), text2: t('openPrivacyDocs') })}
+                >
+                  {t('privacyPolicyLabel')}
+                </Text>
               </Text>
-            </Text>
-
-            {/* Version Footer */}
-            <View style={styles.footerRow}>
-              <Text style={styles.versionText}>v1.0.0</Text>
             </View>
 
           </Animated.View>
         </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  inputRowError: {
+    borderColor: '#DC2626',
+    borderWidth: 1.5,
+  },
+  fieldErrorText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#DC2626',
+    marginTop: 8,
+    marginBottom: 2,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
   },
   keyboardView: {
     flexGrow: 1,
-    padding: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
     justifyContent: 'center',
   },
   contentContainer: {
@@ -265,156 +254,46 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   headerContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-    paddingHorizontal: 4,
-  },
-  headerTextSection: {
-    flex: 1,
-  },
-  logoBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginTop: 4,
+    marginBottom: 28,
+  },
+  logoBadgeContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  pinIconWrapper: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinStoreIcon: {
+    position: 'absolute',
+    top: 22,
+  },
+  brandTitleText: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginTop: 8,
+    letterSpacing: -0.5,
+  },
+  brandTitleHighlight: {
+    color: '#16A34A',
   },
   welcomeText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  portalTitle: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '900',
     color: '#0F172A',
-    lineHeight: 30,
-    marginTop: 2,
+    textAlign: 'center',
   },
-  sloganRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  sloganText: {
-    fontSize: 12,
+  subheadText: {
+    fontSize: 15,
     color: '#64748B',
     fontWeight: '500',
-  },
-  heartEmoji: {
-    fontSize: 11,
-    marginLeft: 4,
-  },
-  shopIllustration: {
-    width: 100,
-    height: 80,
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginBottom: 4,
-  },
-  awningContainer: {
-    width: 90,
-    height: 22,
-    position: 'relative',
-    zIndex: 4,
-  },
-  awning: {
-    flexDirection: 'row',
-    width: 90,
-    height: 16,
-    borderTopLeftRadius: 6,
-    borderTopRightRadius: 6,
-    overflow: 'hidden',
-  },
-  scallopsRow: {
-    flexDirection: 'row',
-    width: 90,
-    height: 6,
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    overflow: 'hidden',
-  },
-  scallop: {
-    width: 15,
-    height: 15,
-    borderRadius: 7.5,
-    marginTop: -7.5,
-  },
-  stripe: {
-    flex: 1,
-  },
-  shopWall: {
-    width: 78,
-    height: 38,
-    backgroundColor: '#FFFFFF',
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    position: 'relative',
-    zIndex: 2,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-  },
-  shopDoor: {
-    width: 16,
-    height: 25,
-    backgroundColor: '#F1F5F9',
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-    position: 'absolute',
-    bottom: 0,
-    left: 8,
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-  },
-  openBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: '#15803D',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#DCFCE7',
-  },
-  openBadgeText: {
-    fontSize: 7,
-    fontWeight: '900',
-    color: '#FFFFFF',
-  },
-  bushLeft: {
-    position: 'absolute',
-    left: -8,
-    bottom: -2,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#DCFCE7',
-    zIndex: 1,
-    opacity: 0.9,
-  },
-  bushRight: {
-    position: 'absolute',
-    right: -6,
-    bottom: -2,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#BBF7D0',
-    zIndex: 1,
-    opacity: 0.95,
+    textAlign: 'center',
+    marginTop: 8,
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -513,17 +392,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   button: {
-    backgroundColor: '#15803D',
-    height: 48,
-    borderRadius: 12,
+    backgroundColor: '#16A34A',
+    height: 52,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
-    shadowColor: '#15803D',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
+    marginTop: 18,
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   buttonDisabled: {
     backgroundColor: '#94A3B8',
@@ -539,37 +418,33 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
     flex: 1,
     textAlign: 'center',
-    marginLeft: 18,
+    marginLeft: 20,
   },
   buttonChevron: {
     alignSelf: 'center',
   },
+  legaleseContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 26,
+    marginBottom: 16,
+    paddingHorizontal: 12,
+  },
   legaleseText: {
-    fontSize: 11,
-    color: '#94A3B8',
+    fontSize: 14,
+    color: '#64748B',
     textAlign: 'center',
-    lineHeight: 16,
-    marginTop: 28,
-    paddingHorizontal: 8,
+    lineHeight: 20,
     fontWeight: '500',
   },
   legaleseLink: {
-    color: '#15803D',
+    color: '#16A34A',
     fontWeight: '700',
     textDecorationLine: 'underline',
-  },
-  footerRow: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 24,
-  },
-  versionText: {
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '700',
   },
 });
