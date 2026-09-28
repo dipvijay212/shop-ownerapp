@@ -1,6 +1,7 @@
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { APP_UPDATE_CONFIG } from '../config/appUpdateConfig';
-import { UPDATE_TEST_MODE, UPDATE_TEST_TYPE } from '../config/updateTestConfig';
+import { APP_KEY, FALLBACK_STORE_URL } from '../config/appUpdateConfig';
+import { getAppConfig } from '../api/endpoints/platform';
 import { getCurrentAppVersion } from '../utils/appVersion';
 import { compareVersions } from '../utils/versionCompare';
 
@@ -11,107 +12,83 @@ export const UPDATE_TYPES = {
 };
 
 const DISMISSED_TIMESTAMP_KEY = '@app_update_soft_dismissed_at';
+const DISMISSED_VERSION_KEY = '@app_update_soft_dismissed_version';
 const SOFT_UPDATE_COOLDOWN_HOURS = 24;
 
-/**
- * Checks whether soft update is currently in cooldown period (24 hours).
- */
-export const isSoftUpdateInCooldown = async () => {
-  try {
-    const rawTime = await AsyncStorage.getItem(DISMISSED_TIMESTAMP_KEY);
-    if (!rawTime) return false;
+const PLATFORM = Platform.OS === 'ios' ? 'ios' : 'android';
 
+/**
+ * Whether "Maybe Later" was tapped in the last 24 hours for this same latest
+ * version. A newer release always brings the prompt back.
+ */
+export const isSoftUpdateInCooldown = async (latestVersion) => {
+  try {
+    const [rawTime, version] = await Promise.all([
+      AsyncStorage.getItem(DISMISSED_TIMESTAMP_KEY),
+      AsyncStorage.getItem(DISMISSED_VERSION_KEY),
+    ]);
+    if (!rawTime || version !== latestVersion) return false;
     const dismissedTime = parseInt(rawTime, 10);
     if (isNaN(dismissedTime)) return false;
-
-    const now = Date.now();
-    const elapsedHours = (now - dismissedTime) / (1000 * 60 * 60);
-
-    return elapsedHours < SOFT_UPDATE_COOLDOWN_HOURS;
+    return (Date.now() - dismissedTime) / (1000 * 60 * 60) < SOFT_UPDATE_COOLDOWN_HOURS;
   } catch (error) {
-    console.error('Error checking soft update cooldown:', error);
     return false;
   }
 };
 
-/**
- * Records timestamp when shop owner taps "Maybe Later" for soft update.
- */
-export const recordSoftUpdateDismissed = async () => {
+/** Records the shop owner tapping "Maybe Later" on a soft update. */
+export const recordSoftUpdateDismissed = async (latestVersion) => {
   try {
     await AsyncStorage.setItem(DISMISSED_TIMESTAMP_KEY, Date.now().toString());
+    if (latestVersion) await AsyncStorage.setItem(DISMISSED_VERSION_KEY, latestVersion);
   } catch (error) {
-    console.error('Error saving soft update dismissal timestamp:', error);
+    // Non-fatal — worst case the soft prompt reappears next launch.
   }
 };
 
-/**
- * Clears soft update cooldown timestamp (useful for testing/resetting).
- */
-export const resetSoftUpdateCooldown = async () => {
-  try {
-    await AsyncStorage.removeItem(DISMISSED_TIMESTAMP_KEY);
-  } catch (error) {
-    console.error('Error resetting soft update cooldown:', error);
-  }
-};
+const NONE = (currentVersion) => ({
+  type: UPDATE_TYPES.NO_UPDATE,
+  shouldShowModal: false,
+  currentVersion,
+  latestVersion: null,
+  minimumVersion: null,
+  storeUrl: null,
+});
 
 /**
- * Core service function to check for app update status.
- * Returns update type, versions, and modal visibility state.
+ * Whether to ask the owner to update, from the versions and store link an
+ * admin set for this app and platform (GET /app-config).
+ *
+ * Fails OPEN: no config, no block for this platform, no store link, or any
+ * error → no prompt. A network hiccup must never lock a shop out of its orders
+ * behind a mandatory update screen.
  */
 export const checkAppUpdate = async () => {
+  const currentVersion = getCurrentAppVersion();
+  // Not knowing our own version means not knowing who is behind.
+  if (!currentVersion) return NONE(currentVersion);
   try {
-    let updateType = UPDATE_TYPES.NO_UPDATE;
+    const cfg = await getAppConfig();
+    const release = cfg?.apps?.[APP_KEY]?.[PLATFORM];
+    const storeUrl = release?.store_url || FALLBACK_STORE_URL[PLATFORM];
+    if (!release?.latest_version || !release?.min_version || !storeUrl) return NONE(currentVersion);
 
-    if (UPDATE_TEST_MODE) {
-      if (UPDATE_TEST_TYPE === 'hard') {
-        updateType = UPDATE_TYPES.HARD_UPDATE;
-      } else if (UPDATE_TEST_TYPE === 'soft') {
-        updateType = UPDATE_TYPES.SOFT_UPDATE;
-      } else {
-        updateType = UPDATE_TYPES.NO_UPDATE;
-      }
-    } else {
-      const currentVersion = getCurrentAppVersion();
-      const { latestVersion, minimumVersion } = APP_UPDATE_CONFIG;
+    let type = UPDATE_TYPES.NO_UPDATE;
+    if (compareVersions(currentVersion, release.min_version) < 0) type = UPDATE_TYPES.HARD_UPDATE;
+    else if (compareVersions(currentVersion, release.latest_version) < 0) type = UPDATE_TYPES.SOFT_UPDATE;
 
-      if (compareVersions(currentVersion, minimumVersion) < 0) {
-        updateType = UPDATE_TYPES.HARD_UPDATE;
-      } else if (compareVersions(currentVersion, latestVersion) < 0) {
-        updateType = UPDATE_TYPES.SOFT_UPDATE;
-      } else {
-        updateType = UPDATE_TYPES.NO_UPDATE;
-      }
-    }
-
-    // Evaluate soft update cooldown
-    let shouldShowModal = false;
-    if (updateType === UPDATE_TYPES.HARD_UPDATE) {
-      shouldShowModal = true;
-    } else if (updateType === UPDATE_TYPES.SOFT_UPDATE) {
-      const inCooldown = await isSoftUpdateInCooldown();
-      shouldShowModal = !inCooldown;
-    }
+    const shouldShowModal = type === UPDATE_TYPES.HARD_UPDATE
+      || (type === UPDATE_TYPES.SOFT_UPDATE && !(await isSoftUpdateInCooldown(release.latest_version)));
 
     return {
-      type: updateType,
+      type,
       shouldShowModal,
-      currentVersion: getCurrentAppVersion(),
-      latestVersion: APP_UPDATE_CONFIG.latestVersion,
-      minimumVersion: APP_UPDATE_CONFIG.minimumVersion,
-      config: APP_UPDATE_CONFIG,
+      currentVersion,
+      latestVersion: release.latest_version,
+      minimumVersion: release.min_version,
+      storeUrl,
     };
   } catch (error) {
-    console.error('Error performing update check:', error);
-    // Error handling rule: Do not block shop owner on future API failure
-    return {
-      type: UPDATE_TYPES.NO_UPDATE,
-      shouldShowModal: false,
-      currentVersion: getCurrentAppVersion(),
-      latestVersion: APP_UPDATE_CONFIG.latestVersion,
-      minimumVersion: APP_UPDATE_CONFIG.minimumVersion,
-      config: APP_UPDATE_CONFIG,
-    };
+    return NONE(currentVersion);
   }
 };

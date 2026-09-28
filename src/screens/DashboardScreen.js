@@ -75,6 +75,10 @@ const { width } = Dimensions.get('window');
 // restore the section; nothing else has to change.
 const SHOW_RECENT_ORDERS = false;
 
+
+// Centre of the shop QR until the shop uploads its own logo.
+const PAASORA_QR_LOGO = require('../assets/paasora-qr-logo.png');
+
 export const DashboardScreen = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -965,21 +969,17 @@ export const DashboardScreen = () => {
                           backgroundColor="#FFFFFF"
                         />
 
-                        {/* Centered Store Brand Emblem Overlay — the shop's own
-                            logo once it has uploaded one, so a printed standee
-                            carries the shop's identity rather than a generic
-                            storefront glyph. */}
+                        {/* Centered Brand Emblem Overlay — the shop's own logo
+                            once it has uploaded one from Business Profile, so a
+                            printed standee carries the shop's identity; the
+                            Paasora mark until then. */}
                         <View style={styles.qrCenterLogoEmblem}>
                           <View style={styles.qrCenterLogoInner}>
-                            {shop?.logo_url ? (
-                              <Image
-                                source={{ uri: shop.logo_url }}
-                                style={styles.qrCenterLogoImage}
-                                resizeMode="cover"
-                              />
-                            ) : (
-                              <Store color="#16A34A" size={18} />
-                            )}
+                            <Image
+                              source={shop?.logo_url ? { uri: shop.logo_url } : PAASORA_QR_LOGO}
+                              style={styles.qrCenterLogoImage}
+                              resizeMode="cover"
+                            />
                           </View>
                         </View>
                       </View>

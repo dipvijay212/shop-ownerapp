@@ -48,6 +48,13 @@ export const API_ROOT_URL = ORIGINS[BACKEND];
 
 export const API_BASE_URL = `${API_ROOT_URL}/v1`;
 
+// Public website (prestiousit-official). Account deletion is completed there,
+// with OTP verification — the app only shows the pre-deletion review and opens
+// this page. Dev builds point at the site's `next dev` on this Mac (port 3917,
+// reachable over the LAN); release builds use the real domain.
+const WEBSITE_ORIGIN = __DEV__ ? `http://${LAN_IP}:3917` : 'https://prestious.com';
+export const DELETE_ACCOUNT_URL = `${WEBSITE_ORIGIN}/paasora/partner/delete-account`;
+
 export const API_TIMEOUT_MS = 20000;
 
 export const AUDIENCE = 'owner';

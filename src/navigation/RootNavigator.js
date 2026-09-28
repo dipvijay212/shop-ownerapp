@@ -13,6 +13,8 @@ import { SubscriptionPaymentScreen } from '../screens/SubscriptionPaymentScreen'
 import { ShopUnavailableScreen } from '../screens/ShopUnavailableScreen';
 import { RegisterShopScreen } from '../screens/auth/RegisterShopScreen';
 import { DocumentUploadScreen } from '../screens/DocumentUploadScreen';
+import { DeleteAccountScreen } from '../screens/DeleteAccountScreen';
+import { DeletionSubmittedScreen } from '../screens/DeletionSubmittedScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -23,7 +25,7 @@ const Stack = createNativeStackNavigator();
 const MIN_SPLASH_DURATION_MS = 2000;
 
 export const RootNavigator = () => {
-  const { isLoading, userToken, shopRoute, shop, shopKnown } = useContext(AuthContext);
+  const { isLoading, userToken, shopRoute, shop, shopKnown, accountNotice } = useContext(AuthContext);
   const [minDurationElapsed, setMinDurationElapsed] = useState(false);
 
   useEffect(() => {
@@ -32,6 +34,9 @@ export const RootNavigator = () => {
   }, []);
 
   if (isLoading || !minDurationElapsed) return <SplashScreen />;
+
+  // A confirmed deletion request has just locked the account.
+  if (!userToken && accountNotice) return <DeletionSubmittedScreen />;
 
   if (!userToken) {
     return (
@@ -53,35 +58,45 @@ export const RootNavigator = () => {
     return <ShopUnavailableScreen />;
   }
 
+  // Each branch gets its own `key` so a status change remounts the stack.
+  // These branches are the same component at the same position, so without a
+  // key React reuses the navigator and React Navigation keeps every route
+  // whose name still exists. Onboarding → pending kept [RegisterShop,
+  // DocumentUpload] on screen after a successful submit (both are in the
+  // status stack too), and pending → approved kept ShopStatus up.
   if (shopRoute === SHOP_ROUTE.ONBOARDING) {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator key="onboarding" screenOptions={{ headerShown: false }}>
         <Stack.Screen name="RegisterShop" component={RegisterShopScreen} />
         <Stack.Screen name="DeliveryArea" component={DeliveryAreaScreen} />
         <Stack.Screen name="LanguageSettings" component={LanguageSettingsScreen} />
+        <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} />
         <Stack.Screen name="DocumentUpload" component={DocumentUploadScreen} />
       </Stack.Navigator>
     );
   }
 
   if (shopRoute !== SHOP_ROUTE.DASHBOARD) {
-    // pending_verification · rejected · suspended
+    // pending_verification · rejected · suspended. One key for all three:
+    // a resubmit from DocumentUpload goes back to ShopStatus itself.
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator key="status" screenOptions={{ headerShown: false }}>
         <Stack.Screen name="ShopStatus" component={ShopStatusScreen} />
         <Stack.Screen name="DocumentUpload" component={DocumentUploadScreen} />
         <Stack.Screen name="RegisterShop" component={RegisterShopScreen} />
         <Stack.Screen name="DeliveryArea" component={DeliveryAreaScreen} />
         <Stack.Screen name="LanguageSettings" component={LanguageSettingsScreen} />
+        <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} />
       </Stack.Navigator>
     );
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator key="dashboard" screenOptions={{ headerShown: false }}>
       <Stack.Screen name="MainTabs" component={TabNavigator} />
       <Stack.Screen name="DeliveryArea" component={DeliveryAreaScreen} />
       <Stack.Screen name="LanguageSettings" component={LanguageSettingsScreen} />
+      <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} />
       <Stack.Screen name="ShopStatus" component={ShopStatusScreen} />
       <Stack.Screen name="DocumentUpload" component={DocumentUploadScreen} />
       <Stack.Screen name="Customers" component={CustomersScreen} />

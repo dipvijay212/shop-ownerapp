@@ -252,6 +252,8 @@ export const actionForNotification = (data = {}) => {
       return { route: { name: 'Customers' } };
     case 'subscription_new':
     case 'standing_order_cancelled':
+    // A customer asking for a different quantity — the request waits on top of the round.
+    case 'standing_order_change_requested':
       return { route: tab('Subscriptions') };
     // The shop's own status decides which stack RootNavigator mounts, so the
     // refresh IS most of the navigation. It is awaited before the route below

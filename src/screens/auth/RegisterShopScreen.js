@@ -182,9 +182,12 @@ export const RegisterShopScreen = () => {
             logout().catch((e) => console.error('[RegisterShop] logout rejected', e));
           },
         },
+        // Verifying the OTP already created an account; the owner must be able
+        // to ask for it to be deleted without finishing onboarding first.
+        { text: t('deleteAccount', 'Delete Account'), onPress: () => navigation.navigate('DeleteAccount') },
       ],
     );
-  }, [logout, t]);
+  }, [logout, navigation, t]);
 
   useEffect(() => {
     const handleBackPress = () => {

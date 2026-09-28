@@ -44,6 +44,4 @@ export const updateOwnerProfile = ({ full_name, email, language }) => {
   return http.patch('/owner/me', body);
 };
 
-// Type-to-confirm; explains orders/ledgers are retained and the shop is
-// suspended so it disappears from customer search.
-export const deleteOwnerAccount = () => http.delete('/owner/me');
+// Deleting the account is a reviewed request — see endpoints/accountDeletion.js.

@@ -61,7 +61,7 @@ const rupees = (n) => `₹${Number(n ?? 0).toFixed(2).replace(/\.00$/, '')}`;
 export const SubscriptionPaymentScreen = () => {
   const navigation = useNavigation();
   const { t } = useTranslation();
-  const { bottom: paddingBottom } = useScreenPadding(8);
+  const { insets, bottom: paddingBottom } = useScreenPadding(8);
   const queryClient = useQueryClient();
   const { refreshSubscription } = useContext(AuthContext);
 
@@ -299,7 +299,7 @@ export const SubscriptionPaymentScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} disabled={busy}>
           <ArrowLeft color={busy ? theme.colors.textLight : '#1E293B'} size={22} />
         </TouchableOpacity>

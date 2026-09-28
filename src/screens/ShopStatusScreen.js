@@ -166,6 +166,16 @@ export const ShopStatusScreen = () => {
           <LogOut color="#94A3B8" size={16} />
           <Text style={styles.logoutText}>{t('logOutShort')}</Text>
         </TouchableOpacity>
+
+        {/* Deletion has to be reachable whatever state the shop is in — an
+            owner stuck in review or suspended must not need support for it. */}
+        <TouchableOpacity
+          style={styles.deleteLink}
+          onPress={() => navigation.navigate('DeleteAccount')}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.deleteLinkText}>{t('deleteAccount', 'Delete Account')}</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -241,6 +251,8 @@ const styles = StyleSheet.create({
   supportHours: { fontSize: 12, color: '#94A3B8', marginTop: 8 },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 28, padding: 10 },
   logoutText: { fontSize: 14, color: '#94A3B8', fontWeight: '600' },
+  deleteLink: { marginTop: 4, padding: 10 },
+  deleteLinkText: { fontSize: 13, color: '#EF4444', fontWeight: '600' },
 });
 
 export default ShopStatusScreen;

@@ -11,7 +11,8 @@ import {
   SafeAreaView, 
   Animated, 
   Pressable,
-  StatusBar
+  StatusBar,
+  Alert,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -27,13 +28,15 @@ import { useTranslation } from '../../constants/translations';
 export const VerifyOTPScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { phone } = route.params || { phone: '' };
+  const { phone, resendInSec, devMode: initialDevMode } = route.params || { phone: '' };
   const insets = useSafeAreaInsets();
   
   const { login, languageChosen } = useContext(AuthContext);
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [timer, setTimer] = useState(30);
+  const [timer, setTimer] = useState(resendInSec || 25);
+  // Only when the backend hands out the fixed dev code is the sandbox card true.
+  const [devMode, setDevMode] = useState(!!initialDevMode);
   
   // OTP array state
   const [otpArray, setOtpArray] = useState(['', '', '', '', '', '']);
@@ -176,7 +179,9 @@ export const VerifyOTPScreen = () => {
         return;
       }
     } catch (e) {
-      if (e.isThrottled) {
+      if (e.code === 'ACCOUNT_DELETION_PENDING') {
+        Alert.alert(t('delPendingTitle', 'Account unavailable'), t('delPendingLogin', e.message));
+      } else if (e.isThrottled) {
         const wait = ownerAuthService.getRetryAfterSeconds(e) || 60;
         setTimer(wait);
         Toast.show({
@@ -203,6 +208,7 @@ export const VerifyOTPScreen = () => {
     try {
       const res = await ownerAuthService.sendOtp(phone);
       setTimer(res?.resend_in_sec || 25);
+      setDevMode(!!res?.dev_mode);
       setOtpArray(['', '', '', '', '', '']);
       inputRefs.current[0]?.focus();
       Toast.show({ type: 'success', text1: t('otpResent') });
@@ -314,7 +320,11 @@ export const VerifyOTPScreen = () => {
                       value !== '' && styles.otpBoxFilled
                     ]}
                     keyboardType="number-pad"
-                    maxLength={Platform.OS === 'android' ? 2 : 1}
+                    // The first box takes the whole code from SMS autofill;
+                    // handleChangeText spreads it across the boxes.
+                    maxLength={index === 0 ? 6 : Platform.OS === 'android' ? 2 : 1}
+                    textContentType={index === 0 ? 'oneTimeCode' : 'none'}
+                    autoComplete={index === 0 ? 'sms-otp' : 'off'}
                     value={value}
                     onChangeText={(text) => handleChangeText(text, index)}
                     onKeyPress={(e) => handleKeyPress(e, index)}
@@ -343,6 +353,7 @@ export const VerifyOTPScreen = () => {
               </View>
 
               {/* Development sandbox widget */}
+              {devMode && (
               <View style={styles.devCard}>
                 <View style={styles.devCodeBox}>
                   <Text style={styles.devCodeSymbol}>&gt;_</Text>
@@ -366,6 +377,7 @@ export const VerifyOTPScreen = () => {
                   <Text style={styles.devCopyText}>{t('fillBtn', 'Fill')}</Text>
                 </TouchableOpacity>
               </View>
+              )}
 
               {/* Primary button */}
               <Pressable

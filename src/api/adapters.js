@@ -135,6 +135,9 @@ export const adaptProduct = (p) => ({
   // "HH:mm", or null on a normal product.
   deliveryStartsAt: p.delivery_starts_at ?? null,
   deliveryEndsAt: p.delivery_ends_at ?? null,
+  // Minutes before the window a subscriber may still skip, cancel or change a
+  // delivery. Null = 9 pm the evening before.
+  subscriptionCutoffMinutes: p.subscription_cutoff_minutes ?? null,
   // What the product is actually SOLD as, one row per buyable option. The edit
   // form seeds every configuration field from these, so — like `kind` above —
   // they have to survive the adapter rather than be flattened into `tiers`.
@@ -306,6 +309,7 @@ const NOTIFICATION_CATEGORY = {
   // The standing-order round — the arrangements this shop delivers on.
   subscription_new: 'subscription',
   standing_order_cancelled: 'subscription',
+  standing_order_change_requested: 'subscription',
   // The monthly partner plan (O-26) is the owner's own account, not the round.
   // It used to share the 'subscription' tab, which put renewal receipts in
   // front of an owner looking for their deliveries.

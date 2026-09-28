@@ -137,6 +137,36 @@ const Dropdown = ({ value, placeholder, onPress, icon }) => (
   </TouchableOpacity>
 );
 
+
+// How long before the delivery window customers may still change it.
+const CUTOFF_CHOICES = [null, 30, 60, 120, 240, 720];
+
+const durationLabel = (minutes, t) => {
+  if (minutes < 60) return t('durMinutes', '{count} min', { count: minutes });
+  const h = minutes / 60;
+  return h === 1 ? t('durHour', '{count} hour', { count: h }) : t('durHours', '{count} hours', { count: h });
+};
+
+// "For a 6:00 AM window: until 4:00 AM" — the choice as a clock time, which is
+// what the shop actually has to plan around.
+const cutoffPreview = (windowStart, cutoff, t) => {
+  const [h, m] = String(windowStart).split(':').map(Number);
+  if (cutoff === null || Number.isNaN(h)) {
+    return t('cutoffPreviewEvening', 'For a {window} delivery: until 9:00 PM the evening before', {
+      window: to12h(windowStart),
+    });
+  }
+  let mins = h * 60 + m - cutoff;
+  const dayBefore = mins < 0;
+  if (dayBefore) mins += 24 * 60;
+  const at = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  return dayBefore
+    ? t('cutoffPreviewDayBefore', 'For a {window} delivery: until {time} the day before', {
+        window: to12h(windowStart), time: to12h(at),
+      })
+    : t('cutoffPreviewSameDay', 'For a {window} delivery: until {time}', { window: to12h(windowStart), time: to12h(at) });
+};
+
 export default function ProductFormScreen({ product, onClose, onSaved }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -155,6 +185,9 @@ export default function ProductFormScreen({ product, onClose, onSaved }) {
   const [chargeSubDelivery, setChargeSubDelivery] = useState(false);
   const [windowStart, setWindowStart] = useState('06:00');
   const [windowEnd, setWindowEnd] = useState('08:00');
+  // How long before the window customers may still skip, cancel or change a
+  // delivery. Null = 9 pm the evening before, which is how it always worked.
+  const [cutoff, setCutoff] = useState(null);
   const [pickingWindow, setPickingWindow] = useState(null);
 
   const [units, setUnits] = useState([]);
@@ -210,6 +243,7 @@ export default function ProductFormScreen({ product, onClose, onSaved }) {
     setChargeSubDelivery(product.subscriptionChargeDelivery === true);
     if (product.deliveryStartsAt) setWindowStart(product.deliveryStartsAt);
     if (product.deliveryEndsAt) setWindowEnd(product.deliveryEndsAt);
+    setCutoff(product.subscriptionCutoffMinutes ?? null);
 
     const rows = product.options || [];
     if (saleMode === 'loose') {
@@ -464,7 +498,9 @@ export default function ProductFormScreen({ product, onClose, onSaved }) {
         selling_price: Number(builtOptions.find((o) => o.is_default)?.price || builtOptions[0].price),
         kind,
         subscription_charge_delivery: kind === 'normal' ? false : chargeSubDelivery,
-        ...(kind === 'normal' ? {} : { delivery_starts_at: windowStart, delivery_ends_at: windowEnd }),
+        ...(kind === 'normal'
+          ? {}
+          : { delivery_starts_at: windowStart, delivery_ends_at: windowEnd, subscription_cutoff_minutes: cutoff }),
         options: builtOptions,
       };
 
@@ -930,6 +966,31 @@ export default function ProductFormScreen({ product, onClose, onSaved }) {
                   </View>
                   {form.errors.window ? <Text style={s.error}>{form.errors.window}</Text> : null}
                 </View>
+
+                <View style={{ marginTop: 14 }}>
+                  <Text style={s.switchTitle}>{t('cutoffTitle', 'Customers can change or cancel until')}</Text>
+                  <Text style={s.switchHint}>
+                    {t('cutoffHint', 'After this, a delivery is fixed — no skipping, cancelling or quantity changes.')}
+                  </Text>
+                  <View style={s.cutoffRow}>
+                    {CUTOFF_CHOICES.map((value) => (
+                      <TouchableOpacity
+                        key={String(value)}
+                        style={[s.cutoffChip, cutoff === value && s.kindChipOn]}
+                        onPress={() => setCutoff(value)}
+                      >
+                        <Text style={[s.kindChipText, cutoff === value && s.kindChipTextOn]}>
+                          {value === null
+                            ? t('cutoffEvening', '9 pm the evening before')
+                            : t('cutoffBefore', '{time} before', { time: durationLabel(value, t) })}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={s.cutoffPreview}>
+                    {cutoffPreview(windowStart, cutoff, t)}
+                  </Text>
+                </View>
               </>
             )}
           </View>
@@ -1058,8 +1119,7 @@ const s = StyleSheet.create({
   center: { justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingBottom: 12,
+    alignItems: 'center',
     paddingHorizontal: 8,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
@@ -1203,6 +1263,12 @@ const s = StyleSheet.create({
   kindChipText: { fontSize: 12, fontWeight: '600', color: '#64748B' },
   kindChipTextOn: { color: '#15803D' },
   windowRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  cutoffRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  cutoffChip: {
+    paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8,
+    borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center',
+  },
+  cutoffPreview: { fontSize: 12, fontWeight: '600', color: '#15803D', marginTop: 8 },
   windowBtn: { flex: 1, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 10 },
   windowLabel: { fontSize: 11, color: theme.colors.textLight },
   windowValue: { fontSize: 14, fontWeight: '700', color: theme.colors.textDark, marginTop: 2 },

@@ -10,19 +10,19 @@ import {
   Linking,
   Modal,
   TextInput,
+  Image,
   Platform,
-  StatusBar,
 } from 'react-native';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import {
   CalendarOff, Check, CheckCheck, Clock, History,
-  AlertTriangle, PauseCircle, Trash2, X,
+  AlertTriangle, ArrowRight, PauseCircle, Phone, Repeat, Trash2, X,
 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { theme } from '../theme';
-import { formatWindow } from '../utils/time';
+import { formatWindow, to12h } from '../utils/time';
 import { api } from '../api';
 import { getErrorText } from '../api/errors';
 import { adaptRound } from '../api/adapters';
@@ -51,6 +51,19 @@ const prettyDate = (iso) => {
     ? ''
     : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 };
+// "8:35 AM" today, "9:00 PM, 26 Sep" on another day — IST, whatever the phone says.
+const answerByText = (iso) => {
+  if (!iso) return '';
+  const ist = new Date(Date.parse(iso) + 5.5 * 3600 * 1000).toISOString();
+  const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const time = to12h(ist.slice(11, 16));
+  return ist.slice(0, 10) === today ? time : `${time}, ${prettyDate(ist.slice(0, 10))}`;
+};
+const addDaysIso = (iso, n) => {
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
 const formatAddress = (a) =>
   !a ? '' : [a.address_line, a.area, a.pincode].filter(Boolean).join(', ');
 
@@ -66,8 +79,8 @@ export const SubscribersScreen = () => {
   const navigation = useNavigation();
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { bottom: paddingBottom, footer: footerPad } = useScreenPadding();
-  const { markSubscriptionsSeen, newSubscriptionsCount } = useContext(AuthContext);
+  const { insets, bottom: paddingBottom, footer: footerPad } = useScreenPadding();
+  const { markSubscriptionsSeen, newSubscriptionsCount, refreshCounters } = useContext(AuthContext);
   const isFocused = useIsFocused();
 
   const [busyId, setBusyId] = useState(null);
@@ -84,6 +97,38 @@ export const SubscribersScreen = () => {
   const { data: subs, isLoading: subsLoading, refetch: refetchSubs } = useQuery({
     queryKey: ['subscribers'],
     queryFn: async () => (await api.subscriptions.listSubscribers()) ?? { items: [], totals: {} },
+  });
+
+  // Quantity changes waiting on the shop. Polled like the round: a request
+  // has a deadline, and one found after it has expired is no use to anyone.
+  const { data: changeRequests, refetch: refetchRequests } = useQuery({
+    queryKey: ['changeRequests'],
+    queryFn: async () => (await api.subscriptions.listChangeRequests())?.items ?? [],
+    refetchInterval: 60000,
+  });
+  const [rejecting, setRejecting] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const afterDecision = () => {
+    setBusyId(null);
+    queryClient.invalidateQueries({ queryKey: ['changeRequests'] });
+    queryClient.invalidateQueries({ queryKey: ['round'] });
+    refreshCounters?.();
+  };
+  const approveChange = useMutation({
+    mutationFn: (id) => api.subscriptions.approveChangeRequest(id),
+    onSuccess: () => Toast.show({ type: 'success', text1: t('changeApproved', 'Approved — the customer has been told') }),
+    onError: (err) => Toast.show({ type: 'error', text1: getErrorText(err) }),
+    onSettled: afterDecision,
+  });
+  const rejectChange = useMutation({
+    mutationFn: ({ id, reason }) => api.subscriptions.rejectChangeRequest(id, reason),
+    onSuccess: () => {
+      setRejecting(null);
+      setRejectReason('');
+      Toast.show({ type: 'success', text1: t('changeRejected', 'Declined — the customer has been told') });
+    },
+    onError: (err) => { setRejecting(null); Toast.show({ type: 'error', text1: getErrorText(err) }); },
+    onSettled: afterDecision,
   });
 
   const { data: closures } = useQuery({
@@ -177,6 +222,8 @@ export const SubscribersScreen = () => {
   const statusFor = (s) =>
     s === 'delivered' ? { bg: '#DCFCE7', text: '#15803D', label: t('markDeliveredOne') }
     : s === 'not_delivered' ? { bg: '#FEE2E2', text: '#B91C1C', label: t('markNotDelivered') }
+    // The customer skipped it after it was made up — nothing to deliver.
+    : s === 'cancelled' ? { bg: '#F1F5F9', text: '#64748B', label: t('roundCancelledByCustomer', 'Cancelled by customer') }
     : { bg: '#DBEAFE', text: '#1D4ED8', label: t('roundToConfirm') };
 
   const renderDelivery = (item) => {
@@ -216,6 +263,116 @@ export const SubscribersScreen = () => {
           </>
         ) : null}
       />
+    );
+  };
+
+  // A customer asking for a different quantity on ONE delivery. Spelled out in
+  // full — which product and pack, which delivery, usual against requested,
+  // what it does to the bill — because "curd 1 → 3" left the owner guessing
+  // what was being counted and whether the subscription itself was changing.
+  const renderRequest = (item) => {
+    const busy = busyId === item.id;
+    const more = item.quantity > item.usual_quantity;
+    const tomorrow = item.today ? addDaysIso(item.today, 1) : null;
+    const day = item.date === item.today
+      ? t('changeDayToday', "Today's delivery")
+      : item.date === tomorrow
+        ? t('changeDayTomorrow', "Tomorrow's delivery")
+        : t('changeDayOn', 'Delivery on {date}', { date: prettyDate(item.date) });
+    const when = [
+      prettyDate(item.date),
+      item.delivery_window ? formatWindow(item.delivery_window.starts_at, item.delivery_window.ends_at) : null,
+    ].filter(Boolean).join(' · ');
+    const name = item.customer?.name || item.customer?.phone;
+    return (
+      <View style={styles.reqCard}>
+        <View style={styles.reqKickerRow}>
+          <Repeat color="#B45309" size={13} style={{ marginRight: 5 }} />
+          <Text style={styles.reqKicker}>{t('changeKicker', 'Quantity change for one delivery')}</Text>
+        </View>
+
+        <View style={styles.reqProductRow}>
+          {item.product?.image_url ? (
+            <Image source={{ uri: item.product.image_url }} style={styles.reqThumb} />
+          ) : (
+            <View style={styles.reqThumb} />
+          )}
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={styles.subProduct} numberOfLines={1}>
+              {item.product?.name}
+              {item.pack_label ? <Text style={styles.reqPack}>{`  ·  ${item.pack_label}`}</Text> : null}
+            </Text>
+            <Text style={styles.subCustomer} numberOfLines={1}>
+              {t('changeFromCustomer', 'Asked by {name}', { name })}
+            </Text>
+          </View>
+          {item.customer?.phone ? (
+            <TouchableOpacity style={styles.reqCallBtn} onPress={() => call(item.customer.phone)}>
+              <Phone color={theme.colors.primary} size={16} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        <View style={styles.reqWhenBox}>
+          <Text style={styles.reqWhenDay}>{day}</Text>
+          <Text style={styles.reqWhenText}>{when}</Text>
+        </View>
+
+        {/* Usual against requested, side by side, each with what it costs. */}
+        <View style={styles.reqCompare}>
+          <View style={styles.reqCol}>
+            <Text style={styles.reqColLabel}>{t('changeUsual', 'Usual')}</Text>
+            <Text style={styles.reqColQty}>{item.usual_label}</Text>
+            {item.usual_total ? <Text style={styles.reqColPrice}>₹{item.usual_total}</Text> : null}
+          </View>
+          <ArrowRight color="#94A3B8" size={18} />
+          <View style={[styles.reqCol, more ? styles.reqColMore : styles.reqColLess]}>
+            <Text style={styles.reqColLabel}>
+              {more ? t('changeWantsMore', 'Wants more') : t('changeWantsLess', 'Wants less')}
+            </Text>
+            <Text style={[styles.reqColQty, more ? styles.reqQtyMoreText : styles.reqQtyLessText]}>
+              {item.requested_label}
+            </Text>
+            {item.requested_total ? <Text style={styles.reqColPrice}>₹{item.requested_total}</Text> : null}
+          </View>
+        </View>
+
+        <Text style={styles.reqNote}>
+          {t('changeOnlyThis', 'Only this delivery changes. The subscription stays at {usual}.', { usual: item.usual_label })}
+        </Text>
+        <Text style={styles.reqDeadline}>
+          {t('changeAnswerByFull', 'Answer by {time} — otherwise the usual quantity goes out.', {
+            time: answerByText(item.answer_by),
+          })}
+        </Text>
+
+        <View style={styles.reqActions}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.actionPrimary, { flex: 1, justifyContent: 'center' }]}
+            disabled={busy}
+            onPress={() => { setBusyId(item.id); approveChange.mutate(item.id); }}
+          >
+            {busy && approveChange.isPending ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Check color="#FFFFFF" size={15} style={{ marginRight: 5 }} />
+                <Text style={styles.actionPrimaryText}>
+                  {t('changeApproveSend', 'Send {qty}', { qty: item.requested_label })}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.actionGhost, { flex: 1, justifyContent: 'center' }]}
+            disabled={busy}
+            onPress={() => { setRejectReason(''); setRejecting(item); }}
+          >
+            <X color="#DC2626" size={15} style={{ marginRight: 5 }} />
+            <Text style={styles.actionGhostText}>{t('changeKeepUsual', 'Keep usual')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     );
   };
 
@@ -310,7 +467,12 @@ export const SubscribersScreen = () => {
   const toConfirm = deliveries.filter((d) => LIVE.includes(d.status));
   const settled = deliveries.filter((d) => !LIVE.includes(d.status));
 
+  const requests = changeRequests ?? [];
   const sections = [
+    // Waiting on the shop, with a deadline — above everything else.
+    ...(requests.length
+      ? [{ key: 'requests', title: t('changeRequestsSection', 'Quantity requests'), data: requests, kind: 'request' }]
+      : []),
     ...(toConfirm.length
       ? [{ key: 'today', title: t('todaysDeliveries'), data: toConfirm, kind: 'delivery' }]
       : []),
@@ -326,7 +488,7 @@ export const SubscribersScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         {/* A bottom tab has nothing behind it. The arrow is left over from when
             this screen was pushed from More. */}
         <Text style={styles.headerTitleFirst}>{t('subscribers')}</Text>
@@ -346,7 +508,11 @@ export const SubscribersScreen = () => {
           keyExtractor={(item, index) => `${item.id}-${index}`}
           stickySectionHeadersEnabled={false}
           renderItem={({ item, section }) =>
-            section.kind === 'delivery' ? renderDelivery(item) : renderSubscriber(item)
+            section.kind === 'delivery'
+              ? renderDelivery(item)
+              : section.kind === 'request'
+                ? renderRequest(item)
+                : renderSubscriber(item)
           }
           renderSectionHeader={({ section }) => (
             <View style={styles.sectionHeader}>
@@ -374,7 +540,7 @@ export const SubscribersScreen = () => {
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
-              onRefresh={() => { refetchRound(); refetchSubs(); }}
+              onRefresh={() => { refetchRound(); refetchSubs(); refetchRequests(); }}
               colors={[theme.colors.primary]}
               tintColor={theme.colors.primary}
             />
@@ -456,6 +622,47 @@ export const SubscribersScreen = () => {
         </View>
       </Modal>
 
+      {/* Declining says why — "out of stock tomorrow" is worth more to the
+          customer than a bare no. The reason is optional. */}
+      <Modal visible={!!rejecting} transparent animationType="fade" onRequestClose={() => setRejecting(null)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setRejecting(null)} />
+          <View style={[styles.modalContent, { paddingBottom: Math.max(footerPad, 20) }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t('rejectChangeTitle', 'Decline this request?')}</Text>
+              <TouchableOpacity onPress={() => setRejecting(null)}>
+                <X color="#1E293B" size={22} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sectionEmpty}>
+              {t('rejectChangeBody', 'The customer gets their usual quantity on {date}.', { date: prettyDate(rejecting?.date) })}
+            </Text>
+            <TextInput
+              style={styles.reasonInput}
+              placeholder={t('rejectChangeReason', 'Reason (optional)')}
+              placeholderTextColor="#94A3B8"
+              value={rejectReason}
+              onChangeText={setRejectReason}
+              maxLength={120}
+            />
+            <TouchableOpacity
+              style={[styles.addClosureBtn, styles.rejectBtn]}
+              disabled={rejectChange.isPending}
+              onPress={() => {
+                setBusyId(rejecting.id);
+                rejectChange.mutate({ id: rejecting.id, reason: rejectReason.trim() || undefined });
+              }}
+            >
+              {rejectChange.isPending ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.addClosureText}>{t('changeKeepUsual', 'Keep usual')}</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {pickingClosure ? (
         <DateTimePicker
           value={new Date()}
@@ -477,7 +684,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   header: {
     flexDirection: 'row', alignItems: 'center',
@@ -579,6 +785,44 @@ const styles = StyleSheet.create({
     backgroundColor: '#D97706', borderRadius: 11, paddingVertical: 12, marginTop: 12,
   },
   addClosureText: { fontSize: 13.5, fontWeight: '800', color: '#FFFFFF' },
+  rejectBtn: { backgroundColor: '#DC2626' },
+  reqCard: {
+    backgroundColor: '#FFFFFF', borderRadius: 15, marginBottom: 10, padding: 14,
+    borderWidth: 1, borderColor: '#FDE68A',
+  },
+  reqKickerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  reqKicker: {
+    fontSize: 11, fontWeight: '800', color: '#B45309',
+    textTransform: 'uppercase', letterSpacing: 0.4,
+  },
+  reqProductRow: { flexDirection: 'row', alignItems: 'center' },
+  reqThumb: { width: 44, height: 44, borderRadius: 10, backgroundColor: '#F1F5F9' },
+  reqPack: { fontSize: 12.5, fontWeight: '600', color: '#64748B' },
+  reqCallBtn: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: '#F0FDF4',
+    alignItems: 'center', justifyContent: 'center', marginLeft: 8,
+  },
+  reqWhenBox: {
+    marginTop: 12, backgroundColor: '#F8FAFC', borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 8,
+  },
+  reqWhenDay: { fontSize: 13, fontWeight: '800', color: '#1E293B' },
+  reqWhenText: { fontSize: 12, fontWeight: '600', color: '#64748B', marginTop: 2 },
+  reqCompare: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8 },
+  reqCol: {
+    flex: 1, borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0',
+    paddingHorizontal: 10, paddingVertical: 8,
+  },
+  reqColMore: { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' },
+  reqColLess: { borderColor: '#FCD34D', backgroundColor: '#FFFBEB' },
+  reqColLabel: { fontSize: 10.5, fontWeight: '700', color: '#64748B', textTransform: 'uppercase' },
+  reqColQty: { fontSize: 15, fontWeight: '800', color: '#1E293B', marginTop: 3 },
+  reqColPrice: { fontSize: 12, fontWeight: '600', color: '#64748B', marginTop: 1 },
+  reqQtyMoreText: { color: '#15803D' },
+  reqQtyLessText: { color: '#B45309' },
+  reqNote: { fontSize: 12, fontWeight: '600', color: '#475569', marginTop: 10, lineHeight: 17 },
+  reqDeadline: { fontSize: 11.5, fontWeight: '600', color: '#B45309', marginTop: 4, lineHeight: 16 },
+  reqActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
 });
 
 export default SubscribersScreen;

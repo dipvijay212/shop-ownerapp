@@ -32,6 +32,19 @@ export const getUnseenCount = () => http.get('/owner/subscriptions/unseen');
 // Called when the round screen opens — that IS the owner having seen them.
 export const clearUnseen = () => http.post('/owner/subscriptions/unseen/clear', {});
 
+// ── quantity change requests ───────────────────────────────────────────────
+
+// Customers asking for a different quantity on one delivery. Pending only by
+// default; each carries `answer_by`, after which it expires on its own.
+export const listChangeRequests = (status) =>
+  http.get('/owner/subscriptions/change-requests', { params: status ? { status } : undefined });
+
+export const approveChangeRequest = (id) =>
+  http.post(`/owner/subscriptions/change-requests/${id}/approve`, {});
+
+export const rejectChangeRequest = (id, reason) =>
+  http.post(`/owner/subscriptions/change-requests/${id}/reject`, { reason });
+
 // ── the round ───────────────────────────────────────────────────────────────
 
 // GET /owner/subscriptions/round → { date, customers_away, pending_count, items }

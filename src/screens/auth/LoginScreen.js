@@ -11,16 +11,59 @@ import {
   SafeAreaView,
   Animated,
   Pressable,
-  StatusBar
+  StatusBar,
+  Alert,
+  useWindowDimensions,
 } from 'react-native';
+import Svg, { Defs, LinearGradient, RadialGradient, Pattern, Mask, Stop, Rect, Circle } from 'react-native-svg';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
 import { ownerAuthService } from '../../services/ownerAuthService';
 import Toast from 'react-native-toast-message';
-import { Smartphone, Store, ShieldCheck, ChevronRight, MapPin, ArrowRight, Lock } from 'lucide-react-native';
+import { Smartphone, ShieldCheck, ChevronRight, ArrowRight, Lock } from 'lucide-react-native';
+import { PaasoraPartnerTile } from '../../components/PaasoraPartnerLogo';
 import { useTranslation } from '../../constants/translations';
+
+// Decorative backdrop: mint wash fading to white, two soft brand-green glows
+// and a dot grid that dissolves before it reaches the card.
+const LoginBackdrop = () => {
+  const { width, height } = useWindowDimensions();
+  return (
+    <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Defs>
+        <LinearGradient id="wash" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#DCFCE7" />
+          <Stop offset="0.45" stopColor="#F0FDF4" />
+          <Stop offset="1" stopColor="#FFFFFF" />
+        </LinearGradient>
+        <RadialGradient id="glowTop" cx="50%" cy="50%" r="50%">
+          <Stop offset="0" stopColor="#22C55E" stopOpacity="0.28" />
+          <Stop offset="1" stopColor="#22C55E" stopOpacity="0" />
+        </RadialGradient>
+        <RadialGradient id="glowBottom" cx="50%" cy="50%" r="50%">
+          <Stop offset="0" stopColor="#10B981" stopOpacity="0.16" />
+          <Stop offset="1" stopColor="#10B981" stopOpacity="0" />
+        </RadialGradient>
+        <Pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse">
+          <Circle cx="2" cy="2" r="1.3" fill="#16A34A" fillOpacity="0.14" />
+        </Pattern>
+        <LinearGradient id="dotFade" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#FFFFFF" stopOpacity="1" />
+          <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
+        </LinearGradient>
+        <Mask id="dotMask">
+          <Rect width={width} height={height * 0.45} fill="url(#dotFade)" />
+        </Mask>
+      </Defs>
+      <Rect width={width} height={height} fill="url(#wash)" />
+      <Rect width={width} height={height} fill="url(#dots)" mask="url(#dotMask)" />
+      <Circle cx={width * 0.95} cy={height * 0.06} r={width * 0.6} fill="url(#glowTop)" />
+      <Circle cx={width * 0.02} cy={height * 0.92} r={width * 0.7} fill="url(#glowBottom)" />
+    </Svg>
+  );
+};
 
 export const LoginScreen = () => {
   const navigation = useNavigation();
@@ -74,14 +117,21 @@ export const LoginScreen = () => {
       navigation.navigate('VerifyOTP', {
         phone,
         resendInSec: res?.resend_in_sec,
+        devMode: !!res?.dev_mode,
       });
     } catch (e) {
+      if (e.code === 'ACCOUNT_DELETION_PENDING') {
+        // Too long for a toast, and it is the whole answer to "why can't I
+        // sign in" — the server refuses a locked account.
+        Alert.alert(t('delPendingTitle', 'Account unavailable'), t('delPendingLogin', e.message));
+        return;
+      }
       Toast.show({
         type: 'error',
         text1: e.isThrottled ? 'Too many attempts' : 'Error',
-        text2: e.isThrottled
-          ? `Please wait ${ownerAuthService.getRetryAfterSeconds(e) || 60}s before trying again.`
-          : e.message || 'Failed to send OTP.',
+        // The backend message says how long to wait: 25s after a resend,
+        // an hour once the hourly send limit is hit.
+        text2: e.message || 'Failed to send OTP.',
       });
     } finally {
       setLoading(false);
@@ -92,6 +142,8 @@ export const LoginScreen = () => {
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#DCFCE7" />
+      <LoginBackdrop />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -109,22 +161,14 @@ export const LoginScreen = () => {
 
             {/* Header section matching reference screen design */}
             <View style={[styles.headerContainer, { paddingTop: Platform.OS === 'ios' ? insets.top + 16 : Math.max(insets.top, StatusBar.currentHeight || 24) + 16 }]}>
-              {/* Location Pin Logo with Store icon */}
+              {/* Brand tile — the app-icon artwork, white lockup on brand green */}
               <View style={styles.logoBadgeContainer}>
-                <View style={styles.pinIconWrapper}>
-                  <MapPin color="#16A34A" size={92} fill="#ECFDF5" strokeWidth={1.8} />
-                  <View style={styles.pinStoreIcon}>
-                    <Store color="#16A34A" size={32} strokeWidth={2.4} />
-                  </View>
-                </View>
-                <Text style={styles.brandTitleText}>
-                  Near<Text style={styles.brandTitleHighlight}>Kart</Text>
-                </Text>
+                <PaasoraPartnerTile size={136} background={theme.colors.primary} style={styles.logoTile} />
               </View>
 
               {/* Title & Subtitle */}
-              <Text style={styles.welcomeText}>{t('loginTitle', 'Welcome to NearKart')}</Text>
-              <Text style={styles.subheadText}>{t('loginSubtitle', 'Shop from your trusted nearby stores.')}</Text>
+              <Text style={styles.welcomeText}>{t('loginTitle', 'Welcome to Paasora Partner')}</Text>
+              <Text style={styles.subheadText}>{t('loginSubtitle', 'Manage your shop, orders and payments in one place.')}</Text>
             </View>
 
             {/* Input Card Container (Kept as requested) */}
@@ -263,24 +307,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
-  pinIconWrapper: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pinStoreIcon: {
-    position: 'absolute',
-    top: 22,
-  },
-  brandTitleText: {
-    fontSize: 34,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginTop: 8,
-    letterSpacing: -0.5,
-  },
-  brandTitleHighlight: {
-    color: '#16A34A',
+  logoTile: {
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
   },
   welcomeText: {
     fontSize: 28,
@@ -299,13 +331,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 20,
-    borderWidth: 1.2,
-    borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.03,
-    shadowRadius: 16,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(22, 163, 74, 0.12)',
+    shadowColor: '#14532D',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    elevation: 6,
   },
   cardTitle: {
     fontSize: 15,

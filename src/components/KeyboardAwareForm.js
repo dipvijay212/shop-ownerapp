@@ -14,7 +14,7 @@
 // rediscover it.
 
 import React, { useImperativeHandle, useRef } from 'react';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 const KeyboardAwareForm = React.forwardRef(
@@ -58,12 +58,17 @@ const KeyboardAwareForm = React.forwardRef(
         extraScrollHeight={Platform.OS === 'android' ? 120 : 80}
         extraHeight={140}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
+        // Flattened, not an array: on Android the library computes
+        // `contentContainerStyle.paddingBottom + keyboardSpace` and appends it
+        // LAST. Read off an array, that paddingBottom is undefined, so it
+        // overrode ours with the bare keyboard space — 0 with the keyboard
+        // closed — and the bottom of every form ended flush against the tab bar.
+        contentContainerStyle={StyleSheet.flatten([
           // Room to scroll the LAST field clear of the keyboard; without it the
           // content simply ends and the bottom field cannot come up.
           { paddingBottom: 120 + extraBottomPadding },
           contentContainerStyle,
-        ]}
+        ])}
         {...rest}
       >
         {children}

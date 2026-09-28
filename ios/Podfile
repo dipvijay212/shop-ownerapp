@@ -14,10 +14,7 @@ prepare_react_native_project!
 
 setup_permissions([
   'Camera',
-  'LocationAccuracy',
-  'LocationAlways',
   'LocationWhenInUse',
-  'MediaLibrary',
   'PhotoLibrary',
   'PhotoLibraryAddOnly',
 ])

@@ -14,7 +14,7 @@ import { useTranslation } from '../constants/translations';
 
 const Tab = createBottomTabNavigator();
 
-const TabButton = ({ label, isFocused, onPress, onLongPress, routeName, newOrdersCount, newSubscriptionsCount, pendingKhataCount }) => {
+const TabButton = ({ label, isFocused, onPress, onLongPress, routeName, newOrdersCount, newSubscriptionsCount, pendingChangeRequests, pendingKhataCount }) => {
   const animatedScale = useRef(new Animated.Value(isFocused ? 1.1 : 1)).current;
   const animatedOpacity = useRef(new Animated.Value(isFocused ? 1 : 0.8)).current;
 
@@ -65,7 +65,7 @@ const TabButton = ({ label, isFocused, onPress, onLongPress, routeName, newOrder
   // owner only finds it by going looking. A dot, not a count — the number lives
   // on the Khata row one tap in, which is where it can be acted on.
   const showDot =
-    (routeName === 'Subscriptions' && newSubscriptionsCount > 0) ||
+    (routeName === 'Subscriptions' && (newSubscriptionsCount > 0 || pendingChangeRequests > 0)) ||
     (routeName === 'Profile' && pendingKhataCount > 0);
 
   return (
@@ -101,7 +101,7 @@ const TabButton = ({ label, isFocused, onPress, onLongPress, routeName, newOrder
   );
 };
 
-const CustomTabBar = ({ state, descriptors, navigation, insets, newOrdersCount, newSubscriptionsCount, pendingKhataCount }) => {
+const CustomTabBar = ({ state, descriptors, navigation, insets, newOrdersCount, newSubscriptionsCount, pendingChangeRequests, pendingKhataCount }) => {
   const { t } = useTranslation();
 
   const getTabLabel = (name) => {
@@ -162,6 +162,7 @@ const CustomTabBar = ({ state, descriptors, navigation, insets, newOrdersCount, 
             routeName={route.name}
             newOrdersCount={newOrdersCount}
             newSubscriptionsCount={newSubscriptionsCount}
+            pendingChangeRequests={pendingChangeRequests}
             pendingKhataCount={pendingKhataCount}
           />
         );
@@ -172,7 +173,7 @@ const CustomTabBar = ({ state, descriptors, navigation, insets, newOrdersCount, 
 
 export const TabNavigator = () => {
   const insets = useSafeAreaInsets();
-  const { newOrdersCount, newSubscriptionsCount, pendingKhataCount } = useContext(AuthContext);
+  const { newOrdersCount, newSubscriptionsCount, pendingChangeRequests, pendingKhataCount } = useContext(AuthContext);
 
   return (
     <Tab.Navigator
@@ -182,6 +183,7 @@ export const TabNavigator = () => {
           insets={insets}
           newOrdersCount={newOrdersCount}
           newSubscriptionsCount={newSubscriptionsCount}
+          pendingChangeRequests={pendingChangeRequests}
           pendingKhataCount={pendingKhataCount}
         />
       )}

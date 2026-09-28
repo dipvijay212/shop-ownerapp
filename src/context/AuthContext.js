@@ -11,6 +11,7 @@ import {
   saveShop,
   saveTokens,
 } from '../api/session';
+import { useQueryClient } from '@tanstack/react-query';
 import { dropPushToken, unregisterFromPush } from '../services/pushService';
 
 export const AuthContext = createContext();
@@ -70,6 +71,13 @@ const resolveCategoryIds = (selected) => {
 };
 
 export const AuthProvider = ({ children }) => {
+  const queryClient = useQueryClient();
+  // Shown in place of the auth stack right after a deletion request locks the
+  // account: { requestNo }. The server has already ended every session, so
+  // the message cannot live on an authed screen — the first background 401
+  // would unmount it.
+  const [accountNotice, setAccountNotice] = useState(null);
+  const deletionLockedRef = useRef(false);
   const [isLoading, setIsLoading] = useState(true);
   const [userToken, setUserToken] = useState(null);
   const [owner, setOwner] = useState(null);
@@ -94,6 +102,9 @@ export const AuthProvider = ({ children }) => {
   // dot this one has no "clear" — it is a queue of work, not an announcement,
   // so it stays lit until the owner actually decides each one.
   const [pendingKhataCount, setPendingKhataCount] = useState(0);
+  // Quantity changes customers asked for. Like khata requests, a queue of
+  // work: opening the screen does not answer them, so it never clears the dot.
+  const [pendingChangeRequests, setPendingChangeRequests] = useState(0);
   const [subscription, setSubscription] = useState(null);
 
   const refreshTokenRef = useRef(null);
@@ -189,8 +200,9 @@ export const AuthProvider = ({ children }) => {
       onSessionExpired(() => {
         // Too late to tell the server (no session left to do it with), so
         // kill the token itself — otherwise this phone keeps receiving the
-        // previous owner's orders.
-        dropPushToken();
+        // previous owner's orders. Not after a deletion request, though: the
+        // device stays registered so "your account was resumed" can reach it.
+        if (!deletionLockedRef.current) dropPushToken();
         setUserToken(null);
         setOwner(null);
         setShop(null);
@@ -288,6 +300,7 @@ export const AuthProvider = ({ children }) => {
       if (unseenSubs && subsSeenAtRef.current < startedAt) {
         setNewSubscriptionsCount(unseenSubs.count || 0);
       }
+      if (unseenSubs) setPendingChangeRequests(unseenSubs.change_requests || 0);
       if (pendingKhata) setPendingKhataCount(pendingKhata.count || 0);
     } catch (e) {
       // Badge refresh must never surface an error to the user.
@@ -315,6 +328,7 @@ export const AuthProvider = ({ children }) => {
 
   // Called after ownerAuthService.verifyOtp has persisted the token pair.
   const login = useCallback(async (authPayload) => {
+    deletionLockedRef.current = false;
     if (authPayload?.access_token) {
       await saveTokens(authPayload);
       refreshTokenRef.current = authPayload?.refresh_token || refreshTokenRef.current;
@@ -379,7 +393,7 @@ export const AuthProvider = ({ children }) => {
       //     the shop-category master; names are not accepted.
       const categoryIds = resolveCategoryIds(form.shopCategory);
 
-      const created = await api.shop.createShop({
+      const shopFields = {
         name: form.shopName,
         category_ids: categoryIds,
         contact_phone: form.shopPhone,
@@ -388,7 +402,17 @@ export const AuthProvider = ({ children }) => {
         lng: form.shopLongitude,
         banner_url,
         avg_prep_eta_mins: form.avgPrepEtaMins,
-      });
+      };
+      // A retry after a later step failed finds the shop already created, and
+      // createShop answers 409 forever — the owner could never get past this
+      // screen. Apply the form to the existing shop instead and carry on.
+      let created;
+      try {
+        created = await api.shop.createShop(shopFields);
+      } catch (e) {
+        if (e?.code !== 'SHOP_ALREADY_EXISTS') throw e;
+        created = await api.shop.updateShop(shopFields);
+      }
 
       // 4 · Step 3 — delivery boundary. Radius is sent in METRES; a polygon
       //     ring is [[lng, lat], …] (note the order flip from the map's
@@ -482,6 +506,40 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
+  // After a confirmed deletion request. Local only: the server already ended
+  // the session, and the push registration is deliberately left in place.
+  const endSessionAfterDeletionRequest = useCallback(
+    async (notice) => {
+      deletionLockedRef.current = true;
+      setAccountNotice(notice);
+      await clearSession();
+      refreshTokenRef.current = null;
+      queryClient.clear();
+      setUserToken(null);
+      setOwner(null);
+      setShop(null);
+      setShopKnown(false);
+      setNewOrdersCount(0);
+      setUnreadCount(0);
+      setNewSubscriptionsCount(0);
+      setPendingKhataCount(0);
+      setSubscription(null);
+    },
+    [queryClient],
+  );
+
+  // The website is about to take over deletion. If it locks the account, the
+  // next call fails and the session is dropped — keep the push registration
+  // through that, so "your account was resumed" can still reach this device.
+  const markDeletionPending = useCallback(() => {
+    deletionLockedRef.current = true;
+  }, []);
+
+  const clearAccountNotice = useCallback(() => {
+    deletionLockedRef.current = false;
+    setAccountNotice(null);
+  }, []);
+
   const setAppLanguage = useCallback(
     async (lang) => {
       await AsyncStorage.setItem('owner_preferred_language', lang);
@@ -511,8 +569,14 @@ export const AuthProvider = ({ children }) => {
         markSubscriptionsSeen,
         pendingKhataCount,
         setPendingKhataCount,
+        pendingChangeRequests,
+        setPendingChangeRequests,
         login,
         logout,
+        accountNotice,
+        endSessionAfterDeletionRequest,
+        markDeletionPending,
+        clearAccountNotice,
         registerShop,
         refreshShop,
         updateShopState,

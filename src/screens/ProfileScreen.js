@@ -46,7 +46,6 @@ import {
   Tag,
   Check,
   Search,
-  Smartphone,
   Truck,
   CalendarClock,
   BookOpen,
@@ -64,7 +63,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation, SUPPORTED_LANGUAGES } from '../constants/translations';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { AppUpdateModal } from '../components/AppUpdateModal';
 
 // The API keys hours by weekday number (0=Sunday … 6=Saturday).
 // These stay English: they are the KEYS of `dayWindows` and map to the API's
@@ -107,7 +105,6 @@ export const ProfileScreen = ({ route }) => {
   // viewMode: 'more' | 'edit_shop' | 'reviews' | 'notifications' | 'hours' | 'delivery'
   const [viewMode, setViewMode] = useState(route?.params?.initialMode || 'more');
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
-  const [testUpdateModal, setTestUpdateModal] = useState({ visible: false, type: 'soft' });
 
   useEffect(() => {
     if (route?.params?.initialMode) {
@@ -206,8 +203,6 @@ export const ProfileScreen = ({ route }) => {
   const deliveryScrollRef = useRef(null);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
-  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
-  const [deletingAccount, setDeletingAccount] = useState(false);
 
   // Native Built-in Time Picker States
   const [openTime, setOpenTime] = useState('08:00 AM');
@@ -737,38 +732,10 @@ export const ProfileScreen = ({ route }) => {
     }
   };
 
+  // Opens the deletion REQUEST flow: review → OTP → account locked pending
+  // admin review. Nothing is deleted from here.
   const handleDeleteAccount = () => {
-    setDeleteModalVisible(true);
-  };
-
-  const handleConfirmDeleteAccount = async () => {
-    setDeletingAccount(true);
-    try {
-      await api.auth.deleteOwnerAccount();
-      setDeleteModalVisible(false);
-      Toast.show({
-        type: 'info',
-        text1: t('accountDeletedTitle'),
-        text2: t('accountDeletedSub'),
-      });
-      setTimeout(() => {
-        logout();
-      }, 1000);
-    } catch (e) {
-      console.error(e);
-      setDeleteModalVisible(false);
-      // The server refuses while orders are still in flight (409
-      // ACTIVE_ORDERS_EXIST) — deleting suspends the shop and takes it offline,
-      // which would strand customers mid-order. The error was being swallowed
-      // entirely, so the modal just sat there doing nothing.
-      const activeOrders = e?.details?.active_orders;
-      Alert.alert(
-        activeOrders ? t('finishOpenOrdersFirst') : t('couldNotDeleteAccount'),
-        e?.message || t('somethingWentWrong'),
-      );
-    } finally {
-      setDeletingAccount(false);
-    }
+    navigation.navigate('DeleteAccount');
   };
 
   const renderHeader = (title) => (
@@ -939,39 +906,6 @@ export const ProfileScreen = ({ route }) => {
               </View>
             </View>
 
-            {/* App Update Testing (Developer Tools) */}
-            <View style={styles.devToolsCard}>
-              <View style={styles.devToolsHeader}>
-                <View style={[styles.menuIconBg, { backgroundColor: '#F3E8FF' }]}>
-                  <Smartphone color="#9333EA" size={20} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.devToolsTitle}>{t('appUpdateTesting')}</Text>
-                  <Text style={styles.devToolsSub}>{t('appUpdateTestingSub')}</Text>
-                </View>
-              </View>
-
-              <View style={styles.devToolsRow}>
-                <TouchableOpacity
-                  style={[styles.testUpdateBtn, { backgroundColor: '#E0F2FE', borderColor: '#38BDF8' }]}
-                  activeOpacity={0.8}
-                  onPress={() => setTestUpdateModal({ visible: true, type: 'soft' })}
-                >
-                  <Sparkles color="#0284C7" size={15} style={{ marginRight: 4 }} />
-                  <Text style={[styles.testUpdateText, { color: '#0369A1' }]}>{t('testSoftUpdate')}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.testUpdateBtn, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}
-                  activeOpacity={0.8}
-                  onPress={() => setTestUpdateModal({ visible: true, type: 'hard' })}
-                >
-                  <AlertTriangle color="#DC2626" size={15} style={{ marginRight: 4 }} />
-                  <Text style={[styles.testUpdateText, { color: '#991B1B' }]}>{t('testHardUpdate')}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
             <View style={[styles.divider, { marginTop: 20 }]} />
 
             <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
@@ -990,55 +924,6 @@ export const ProfileScreen = ({ route }) => {
             </View>
           </View>
         </ScrollView>
-
-        {/* Custom Delete Account Confirmation Modal */}
-        <Modal
-          visible={deleteModalVisible}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setDeleteModalVisible(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.customDeleteModalCard}>
-              <TouchableOpacity
-                style={styles.closeModalCross}
-                onPress={() => setDeleteModalVisible(false)}
-              >
-                <X color={theme.colors.textLight} size={20} />
-              </TouchableOpacity>
-
-              <View style={styles.deleteModalIconBg}>
-                <AlertTriangle color={theme.colors.error} size={28} />
-              </View>
-
-              <Text style={styles.deleteModalTitle}>{t('deleteAccountQ')}</Text>
-              <Text style={styles.deleteModalBody}>
-                {t('deleteAccountBody')}
-              </Text>
-
-              <View style={styles.deleteModalActions}>
-                <TouchableOpacity
-                  style={styles.deleteModalCancelBtn}
-                  onPress={() => setDeleteModalVisible(false)}
-                >
-                  <Text style={styles.deleteModalCancelText}>{t('cancel')}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.deleteModalConfirmBtn}
-                  onPress={handleConfirmDeleteAccount}
-                  disabled={deletingAccount}
-                >
-                  {deletingAccount ? (
-                    <ActivityIndicator color="#FFF" size="small" />
-                  ) : (
-                    <Text style={styles.deleteModalConfirmText}>{t('deletePermanently')}</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
 
         {/* App Language Selection Modal */}
         <Modal
@@ -1106,22 +991,6 @@ export const ProfileScreen = ({ route }) => {
           </TouchableOpacity>
         </Modal>
 
-        {/* App Update Testing Modal */}
-        <AppUpdateModal
-          visible={testUpdateModal.visible}
-          type={testUpdateModal.type}
-          latestVersion="2.0.0"
-          minimumVersion="1.5.0"
-          onDismiss={() => setTestUpdateModal({ visible: false, type: 'soft' })}
-          onUpdate={() => {
-            Toast.show({
-              type: 'info',
-              text1: t('updateActionTriggered'),
-              text2: t('updateActionSub'),
-            });
-            setTestUpdateModal({ visible: false, type: 'soft' });
-          }}
-        />
       </View>
     );
   }
@@ -1194,10 +1063,18 @@ export const ProfileScreen = ({ route }) => {
         <KeyboardAwareForm
           ref={editShopScrollRef}
           style={styles.formScroll}
-          contentContainerStyle={{ paddingBottom: isCategoryOpen ? 320 : (insets.bottom > 0 ? insets.bottom + 180 : 200) }}
+          // The tab bar sits below this screen, not over it, and already owns the
+          // home-indicator inset; the keyboard's space is added by the form
+          // itself. So a normal gap is enough — 180+inset left ~230pt of blank
+          // below Save on iOS. The open category list still needs its room.
+          contentContainerStyle={{ paddingBottom: isCategoryOpen ? 320 : 32 }}
         >
             <TouchableWithoutFeedback
               onPress={() => {
+                // This wrapper claims every tap on empty space, so under
+                // keyboardShouldPersistTaps="handled" the scroll view never
+                // dismisses the keyboard itself — it has to happen here.
+                Keyboard.dismiss();
                 if (isCategoryOpen) {
                   setIsCategoryOpen(false);
                   setCategorySearchQuery('');
@@ -1412,7 +1289,6 @@ export const ProfileScreen = ({ route }) => {
                     value={editShopAddress}
                     onChangeText={(v) => { setEditShopAddress(v); clearProfileError('shopAddress'); }}
                     placeholder={t('businessAddressPlaceholder')}
-                    placeholderTextColor={theme.colors.textLight}
                     onFocus={() => {
                       setTimeout(() => {
                         editShopScrollRef.current?.scrollTo({ y: 480, animated: true });
@@ -1423,7 +1299,7 @@ export const ProfileScreen = ({ route }) => {
                 </View>
 
                 {/* Online Payment Option Toggle Card */}
-                <Text style={[styles.formSectionTitle, { marginTop: 16 }]}>{t('storePaymentOptions')}</Text>
+                {/* <Text style={[styles.formSectionTitle, { marginTop: 16 }]}>{t('storePaymentOptions')}</Text>
                 <View style={styles.paymentSettingCard}>
                   <View style={styles.paymentSettingHeaderRow}>
                     <View style={styles.paymentSettingIconBg}>
@@ -1457,7 +1333,7 @@ export const ProfileScreen = ({ route }) => {
                         : '🔒 Online Payments Disabled: Customers can only choose Cash on Delivery (COD) or Khata Udhar at checkout.'}
                     </Text>
                   </View>
-                </View>
+                </View> */}
 
                 <TouchableOpacity style={styles.saveBtn} onPress={handleSaveShop} disabled={savingShop}>
                   {savingShop ? (
@@ -2978,51 +2854,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,
-  },
-
-  // App Update Testing Dev Tools Styles
-  devToolsCard: {
-    backgroundColor: '#FAF5FF',
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: '#E9D5FF',
-    padding: 14,
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  devToolsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  devToolsTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#6B21A8',
-  },
-  devToolsSub: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#9333EA',
-    marginTop: 1,
-  },
-  devToolsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  testUpdateBtn: {
-    flex: 1,
-    height: 40,
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
-  devToolsText: {
-    fontSize: 12,
-    fontWeight: '800',
   },
 
   // Delivery Settings Card & Field Styles
