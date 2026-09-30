@@ -49,12 +49,15 @@ import {
   Truck,
   CalendarClock,
   BookOpen,
+  ShieldCheck,
+  FileText,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthContext } from '../context/AuthContext';
 import { api } from '../api';
 import { theme } from '../theme';
 import KeyboardAwareForm from '../components/KeyboardAwareForm';
+import LegalSheet from '../components/LegalSheet';
 import { to12h } from '../utils/time';
 import { CATEGORY_ITEMS, getCategoryColor } from '../constants/shopCategories';
 import Toast from 'react-native-toast-message';
@@ -104,6 +107,14 @@ export const ProfileScreen = ({ route }) => {
 
   // viewMode: 'more' | 'edit_shop' | 'reviews' | 'notifications' | 'hours' | 'delivery'
   const [viewMode, setViewMode] = useState(route?.params?.initialMode || 'more');
+  // Privacy Policy / Terms share one sheet. The kind is kept after closing so
+  // the title does not change while the sheet slides away.
+  const [legalVisible, setLegalVisible] = useState(false);
+  const [legalKind, setLegalKind] = useState('privacy');
+  const openLegal = (kind) => {
+    setLegalKind(kind);
+    setLegalVisible(true);
+  };
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
 
   useEffect(() => {
@@ -875,6 +886,30 @@ export const ProfileScreen = ({ route }) => {
               <ChevronRight color={theme.colors.textLight} size={20} />
             </TouchableOpacity>
 
+            <TouchableOpacity style={styles.menuRow} onPress={() => openLegal('privacy')}>
+              <View style={[styles.menuIconBg, { backgroundColor: '#DCFCE7' }]}>
+                <ShieldCheck color={theme.colors.primary} size={20} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.menuLabel}>{t('privacyPolicyLabel')}</Text>
+                <Text style={styles.menuSubLabel}>{t('privacyPolicySub')}</Text>
+              </View>
+              <ChevronRight color={theme.colors.textLight} size={20} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.menuRow} onPress={() => openLegal('terms')}>
+              <View style={[styles.menuIconBg, { backgroundColor: '#F1F5F9' }]}>
+                <FileText color="#475569" size={20} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.menuLabel}>{t('termsConditions')}</Text>
+                <Text style={styles.menuSubLabel}>{t('termsConditionsSub')}</Text>
+              </View>
+              <ChevronRight color={theme.colors.textLight} size={20} />
+            </TouchableOpacity>
+
+            <LegalSheet visible={legalVisible} kind={legalKind} onClose={() => setLegalVisible(false)} />
+
             <View style={styles.inlineLangCard}>
               <View style={styles.inlineLangHeaderRow}>
                 <View style={[styles.menuIconBg, { backgroundColor: '#DCFCE7' }]}>
@@ -1312,8 +1347,8 @@ export const ProfileScreen = ({ route }) => {
                       </Text>
                     </View>
                     <Switch
-                      trackColor={{ false: '#CBD5E1', true: '#86EFAC' }}
-                      thumbColor={onlinePaymentEnabled ? '#16A34A' : '#64748B'}
+                      trackColor={{ false: '#CBD5E1', true: Platform.OS === 'ios' ? '#16A34A' : '#86EFAC' }}
+                      thumbColor={Platform.OS === 'ios' ? undefined : onlinePaymentEnabled ? '#16A34A' : '#64748B'}
                       ios_backgroundColor="#CBD5E1"
                       onValueChange={setOnlinePaymentEnabled}
                       value={onlinePaymentEnabled}
@@ -1372,8 +1407,9 @@ export const ProfileScreen = ({ route }) => {
                   <Switch
                     value={isOpen}
                     onValueChange={() => toggleDay(day)}
-                    trackColor={{ false: '#CBD5E1', true: theme.colors.primaryLight }}
-                    thumbColor={isOpen ? theme.colors.primary : '#F1F5F9'}
+                    trackColor={{ false: '#CBD5E1', true: Platform.OS === 'ios' ? theme.colors.primary : theme.colors.primaryLight }}
+                    thumbColor={Platform.OS === 'ios' ? undefined : isOpen ? theme.colors.primary : '#F1F5F9'}
+                    ios_backgroundColor="#CBD5E1"
                   />
                 </View>
 
@@ -1499,8 +1535,9 @@ export const ProfileScreen = ({ route }) => {
                 <Switch
                   value={isDeliveryChargeEnabled}
                   onValueChange={setIsDeliveryChargeEnabled}
-                  trackColor={{ false: '#CBD5E1', true: '#86EFAC' }}
-                  thumbColor={isDeliveryChargeEnabled ? '#16A34A' : '#F8FAFC'}
+                  trackColor={{ false: '#CBD5E1', true: Platform.OS === 'ios' ? '#16A34A' : '#86EFAC' }}
+                  thumbColor={Platform.OS === 'ios' ? undefined : isDeliveryChargeEnabled ? '#16A34A' : '#F8FAFC'}
+                  ios_backgroundColor="#CBD5E1"
                 />
               </View>
 

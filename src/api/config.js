@@ -1,6 +1,6 @@
 // Backend configuration (Owner app).
 //
-// Live spec & playground: https://localmart-backend.prestious.com/docs
+// Live spec & playground: https://paasora-backend.prestious.com/docs
 
 // ── Pick a backend ──────────────────────────────────────────────────────────
 // Change this one line. Everything else is derived.
@@ -35,7 +35,7 @@ const TUNNEL_ORIGIN = 'https://mjcp6mtf-4001.inc1.devtunnels.ms';
 // device can reach neither and needs the LAN address — or `adb reverse
 // tcp:4001 tcp:4001`, which forwards the device's localhost over USB.
 const ORIGINS = {
-  production: 'https://localmart-backend.prestious.com',
+  production: 'https://paasora-backend.prestious.com',
   tunnel: TUNNEL_ORIGIN,
   emulator: `http://10.0.2.2:${LOCAL_PORT}`,
   lan: `http://${LAN_IP}:${LOCAL_PORT}`,
@@ -48,12 +48,19 @@ export const API_ROOT_URL = ORIGINS[BACKEND];
 
 export const API_BASE_URL = `${API_ROOT_URL}/v1`;
 
-// Public website (prestiousit-official). Account deletion is completed there,
-// with OTP verification — the app only shows the pre-deletion review and opens
-// this page. Dev builds point at the site's `next dev` on this Mac (port 3917,
-// reachable over the LAN); release builds use the real domain.
+// Public website (prestiousit-official). Dev builds point at the site's
+// `next dev` on this Mac (port 3917, reachable over the LAN); release builds
+// use the real domain.
 const WEBSITE_ORIGIN = __DEV__ ? `http://${LAN_IP}:3917` : 'https://prestious.com';
-export const DELETE_ACCOUNT_URL = `${WEBSITE_ORIGIN}/paasora/partner/delete-account`;
+
+// Account deletion is completed on the live site, with OTP verification — the
+// app only shows the pre-deletion review and opens this page. Always the live
+// domain, dev builds included.
+export const DELETE_ACCOUNT_URL = 'https://prestious.com/paasora/partner/delete-account';
+
+// Privacy Policy and Terms, served as JSON by the same site from the same
+// source as its /paasora/partner/* legal pages (see src/api/endpoints/legal.js).
+export const LEGAL_API_URL = `${WEBSITE_ORIGIN}/api/paasora/legal`;
 
 export const API_TIMEOUT_MS = 20000;
 

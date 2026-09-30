@@ -1048,6 +1048,14 @@ export const translations = {
     termsOfService: "Terms of Service",
     privacyPolicyLabel: "Privacy Policy",
     openPrivacyDocs: "Open Privacy documentation",
+    privacyPolicySub: "How we collect & use your data",
+    termsConditionsSub: "Rules for selling on Paasora",
+    legalLoading: "Loading…",
+    legalLoadFailed: "Couldn't load this page. Check your internet connection and try again.",
+    legalRetry: "Try Again",
+    legalLastUpdated: "Last updated: {date}",
+    legalOfflineCopy: "You're offline. Showing the last saved copy.",
+    legalViewOnWebsite: "View on website",
 
     // ── Verify OTP ──
     verificationIncomplete: "Verification Incomplete",
@@ -2096,6 +2104,14 @@ export const translations = {
     termsOfService: "सेवा की शर्तें",
     privacyPolicyLabel: "गोपनीयता नीति",
     openPrivacyDocs: "गोपनीयता दस्तावेज़ खोलें",
+    privacyPolicySub: "हम आपका डेटा कैसे इकट्ठा और इस्तेमाल करते हैं",
+    termsConditionsSub: "पासोरा पर बेचने के नियम",
+    legalLoading: "लोड हो रहा है…",
+    legalLoadFailed: "यह पेज लोड नहीं हो सका। अपना इंटरनेट कनेक्शन जांचें और फिर से प्रयास करें।",
+    legalRetry: "फिर से प्रयास करें",
+    legalLastUpdated: "अंतिम अपडेट: {date}",
+    legalOfflineCopy: "आप ऑफ़लाइन हैं। आखिरी सेव की गई कॉपी दिखाई जा रही है।",
+    legalViewOnWebsite: "वेबसाइट पर देखें",
 
     // ── Verify OTP ──
     verificationIncomplete: "सत्यापन अधूरा",
@@ -3144,6 +3160,14 @@ export const translations = {
     termsOfService: "સેવાની શરતો",
     privacyPolicyLabel: "ગોપનીયતા નીતિ",
     openPrivacyDocs: "ગોપનીયતા દસ્તાવેજ ખોલો",
+    privacyPolicySub: "અમે તમારો ડેટા કેવી રીતે એકત્ર અને ઉપયોગ કરીએ છીએ",
+    termsConditionsSub: "પાસોરા પર વેચાણના નિયમો",
+    legalLoading: "લોડ થઈ રહ્યું છે…",
+    legalLoadFailed: "આ પેજ લોડ થઈ શક્યું નથી. તમારું ઇન્ટરનેટ કનેક્શન તપાસો અને ફરી પ્રયાસ કરો.",
+    legalRetry: "ફરી પ્રયાસ કરો",
+    legalLastUpdated: "છેલ્લે અપડેટ: {date}",
+    legalOfflineCopy: "તમે ઑફલાઇન છો. છેલ્લી સાચવેલી કૉપી બતાવી રહ્યા છીએ.",
+    legalViewOnWebsite: "વેબસાઇટ પર જુઓ",
 
     // ── Verify OTP ──
     verificationIncomplete: "ચકાસણી અધૂરી",

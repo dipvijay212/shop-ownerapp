@@ -13,8 +13,9 @@ import * as notifications from './endpoints/notifications';
 import * as platform from './endpoints/platform';
 import * as subscriptions from './endpoints/subscriptions';
 import * as accountDeletion from './endpoints/accountDeletion';
+import * as legal from './endpoints/legal';
 
-export const api = { auth, shop, orders, products, khata, business, notifications, platform, subscriptions, accountDeletion };
+export const api = { auth, shop, orders, products, khata, business, notifications, platform, subscriptions, accountDeletion, legal };
 
 export { ApiError, getRetryAfterSeconds } from './errors';
 export { http, newIdempotencyKey, checkHealth } from './httpClient';

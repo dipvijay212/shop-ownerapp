@@ -21,8 +21,8 @@ import {
 } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import { useQRCodeActions } from '../hooks/useQRCodeActions';
+import { useAfterModalDismiss } from '../hooks/useAfterModalDismiss';
 import QRCodeView from '../components/QRCodeView';
-import { API_ROOT_URL } from '../api/config';
 import {
   Bell,
   User,
@@ -68,6 +68,12 @@ import { useTranslation } from '../constants/translations';
 import { isShopLive, scheduleStateNow } from '../utils/storeHours';
 import { runNotificationAction } from '../services/pushService';
 
+// What a shop QR encodes when the backend's own payload_url has not loaded —
+// the public Prestious website page, never the backend URL. Mirrors the
+// backend's QR_BASE_URL.
+// Dev: the website's dev tunnel. Production: 'https://prestious.com/paasora/s'.
+const PUBLIC_QR_BASE_URL = 'https://mjcp6mtf-3000.inc1.devtunnels.ms/paasora/s';
+
 const { width } = Dimensions.get('window');
 
 // The Home screen's "Recent Orders" preview. Off for now — the Orders tab is
@@ -81,6 +87,8 @@ const PAASORA_QR_LOGO = require('../assets/paasora-qr-logo.png');
 
 export const DashboardScreen = () => {
   const navigation = useNavigation();
+  // Navigating off a sheet waits for it to finish closing, or iOS can freeze.
+  const [afterModalDismiss, onModalDismiss] = useAfterModalDismiss();
   const insets = useSafeAreaInsets();
   const { shop, refreshShop, checkNewOrders, refreshSubscription, unreadCount } = useContext(AuthContext);
   const { t } = useTranslation();
@@ -268,12 +276,14 @@ export const DashboardScreen = () => {
   // Tapping an alert: mark it read here and on the server, then do exactly
   // what tapping the same push would have done.
   const openNotification = (notif) => {
-    setShowNotificationsModal(false);
     if (!notif.isRead) {
       setNotifications((prev) => prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n)));
       api.notifications.markRead(notif.id).then(() => checkNewOrders?.()).catch(() => {});
     }
-    runNotificationAction(notif.data, { refreshShop, refreshSubscription }).catch(() => {});
+    afterModalDismiss(
+      () => setShowNotificationsModal(false),
+      () => runNotificationAction(notif.data, { refreshShop, refreshSubscription }).catch(() => {}),
+    );
   };
 
   const [loadingQr, setLoadingQr] = useState(false);
@@ -961,8 +971,8 @@ export const DashboardScreen = () => {
                           value={
                             backendQr?.payload_url ||
                             (shop?.qr_code
-                              ? `https://mjcp6mtf-4001.inc1.devtunnels.ms/s/${shop.qr_code}`
-                              : 'https://mjcp6mtf-4001.inc1.devtunnels.ms/s/shop')
+                              ? `${PUBLIC_QR_BASE_URL}/${shop.qr_code}`
+                              : 'https://mjcp6mtf-3000.inc1.devtunnels.ms/paasora')
                           }
                           size={155}
                           color="#000000"
@@ -1076,7 +1086,7 @@ export const DashboardScreen = () => {
       {/* CREDIT LEDGER MODAL */}
       {/* KHATA — the shop's real book. Every figure here used to be invented:
           ₹14,890 owed by five customers who do not exist. */}
-      <Modal visible={showLedgerModal} transparent animationType="slide" onRequestClose={() => setShowLedgerModal(false)}>
+      <Modal visible={showLedgerModal} transparent animationType="slide" onRequestClose={() => setShowLedgerModal(false)} onDismiss={onModalDismiss}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowLedgerModal(false)} />
           <View style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom + 16, Platform.OS === 'ios' ? 34 : 28) }]}>
@@ -1171,7 +1181,7 @@ export const DashboardScreen = () => {
 
             <TouchableOpacity
               style={styles.shareQrBtn}
-              onPress={() => { setShowLedgerModal(false); navigation.navigate('Customers'); }}
+              onPress={() => afterModalDismiss(() => setShowLedgerModal(false), () => navigation.navigate('Customers'))}
             >
               <Text style={styles.shareQrText}>{t('viewAllCustomers')}</Text>
             </TouchableOpacity>
@@ -1253,7 +1263,7 @@ export const DashboardScreen = () => {
       </Modal>
 
       {/* NOTIFICATION CENTER & AI INSIGHTS MODAL */}
-      <Modal visible={showNotificationsModal} transparent animationType="slide" onRequestClose={() => setShowNotificationsModal(false)}>
+      <Modal visible={showNotificationsModal} transparent animationType="slide" onRequestClose={() => setShowNotificationsModal(false)} onDismiss={onModalDismiss}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowNotificationsModal(false)} />
           <View style={[styles.modalContent, { maxHeight: '88%', height: '88%', paddingBottom: Math.max(insets.bottom + 16, Platform.OS === 'ios' ? 34 : 28) }]}>

@@ -25,6 +25,7 @@ import Toast from 'react-native-toast-message';
 import { Smartphone, ShieldCheck, ChevronRight, ArrowRight, Lock } from 'lucide-react-native';
 import { PaasoraPartnerTile } from '../../components/PaasoraPartnerLogo';
 import { useTranslation } from '../../constants/translations';
+import LegalSheet from '../../components/LegalSheet';
 
 // Decorative backdrop: mint wash fading to white, two soft brand-green glows
 // and a dot grid that dissolves before it reaches the card.
@@ -71,6 +72,12 @@ export const LoginScreen = () => {
   const [loading, setLoading] = useState(false);
   const [phoneError, setPhoneError] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [legalVisible, setLegalVisible] = useState(false);
+  const [legalKind, setLegalKind] = useState('terms');
+  const openLegal = (kind) => {
+    setLegalKind(kind);
+    setLegalVisible(true);
+  };
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
 
@@ -249,14 +256,14 @@ export const LoginScreen = () => {
                 {t('legalPrefix')}{' '}
                 <Text
                   style={styles.legaleseLink}
-                  onPress={() => Toast.show({ type: 'info', text1: t('termsConditions'), text2: t('openTermsOfService') })}
+                  onPress={() => openLegal('terms')}
                 >
                   {t('termsOfService')}
                 </Text>{' '}
                 {t('legalAnd')}{' '}
                 <Text
                   style={styles.legaleseLink}
-                  onPress={() => Toast.show({ type: 'info', text1: t('privacyPolicyLabel'), text2: t('openPrivacyDocs') })}
+                  onPress={() => openLegal('privacy')}
                 >
                   {t('privacyPolicyLabel')}
                 </Text>
@@ -266,6 +273,8 @@ export const LoginScreen = () => {
           </Animated.View>
         </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
+
+      <LegalSheet visible={legalVisible} kind={legalKind} onClose={() => setLegalVisible(false)} />
     </View>
   );
 };

@@ -225,11 +225,16 @@ export const DeliveryAreaScreen = () => {
 
   const handleZoom = (zoomIn) => {
     mapRef.current?.getCamera().then(cam => {
-      if (cam) {
+      if (!cam) return;
+      // Apple Maps (iOS) ignores camera.zoom and scales by altitude instead;
+      // halving or doubling it is the same one-level step Google's zoom takes.
+      if (Platform.OS === 'ios') {
+        cam.altitude = zoomIn ? cam.altitude / 2 : cam.altitude * 2;
+      } else {
         cam.zoom = zoomIn ? (cam.zoom + 1) : (cam.zoom - 1);
-        mapRef.current?.animateCamera(cam, { duration: 300 });
       }
-    });
+      mapRef.current?.animateCamera(cam, { duration: 300 });
+    }).catch(() => {});
   };
 
   const handleRecenter = () => {

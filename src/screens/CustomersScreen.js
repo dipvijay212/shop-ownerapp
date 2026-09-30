@@ -420,18 +420,36 @@ export const CustomersScreen = () => {
     }, [fetchCustomers, fetchKhataRequests, fetchAllOrders]),
   );
 
+  // Bumped whenever the customer sheet closes, so an order still loading for
+  // it cannot land afterwards and present over a sheet that is going away.
+  const orderDetailRequest = useRef(0);
+
   const openOrderDetail = useCallback(async (order) => {
     // /owner/orders omits line items, so the summary alone would show the
     // invoice empty. Fetch the full order, and fall back to the summary
     // rather than refusing to open at all.
+    const request = ++orderDetailRequest.current;
     setDetailLoadingId(order.id);
+    let detail;
     try {
-      setOrderDetail(adaptOrder(await api.orders.getOrder(order.id)));
+      detail = adaptOrder(await api.orders.getOrder(order.id));
     } catch (e) {
-      setOrderDetail(order);
-    } finally {
-      setDetailLoadingId(null);
+      detail = order;
     }
+    if (request !== orderDetailRequest.current) return;
+    setOrderDetail(detail);
+    setDetailLoadingId(null);
+  }, []);
+
+  // The order sheet lives inside the customer sheet on iOS, so it goes with it:
+  // left set, it would remount outside and try to present while the customer
+  // sheet is still dismissing, which leaves the whole screen untappable.
+  const closeCustomer = useCallback(() => {
+    orderDetailRequest.current += 1;
+    setDetailLoadingId(null);
+    setOrderDetail(null);
+    setSelectedCustomer(null);
+    setShowPaymentForm(false);
   }, []);
 
   const visibleOrders = useMemo(() => {
@@ -777,16 +795,13 @@ export const CustomersScreen = () => {
       )}
 
       {/* CUSTOMER DETAIL MODAL */}
-      <Modal visible={!!selectedCustomer} transparent animationType="slide" onRequestClose={() => setSelectedCustomer(null)}>
+      <Modal visible={!!selectedCustomer} transparent animationType="slide" onRequestClose={closeCustomer}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalOverlay}>
             <TouchableOpacity
               style={styles.modalBackdrop}
               activeOpacity={1}
-              onPress={() => {
-                setSelectedCustomer(null);
-                setShowPaymentForm(false);
-              }}
+              onPress={closeCustomer}
             />
 
             <View style={[
@@ -800,10 +815,7 @@ export const CustomersScreen = () => {
                   </View>
                   <Text style={styles.modalTitle}>{selectedCustomer?.name}</Text>
                 </View>
-                <TouchableOpacity onPress={() => {
-                  setSelectedCustomer(null);
-                  setShowPaymentForm(false);
-                }}>
+                <TouchableOpacity onPress={closeCustomer}>
                   <X color={theme.colors.textDark} size={24} />
                 </TouchableOpacity>
               </View>
@@ -1178,15 +1190,27 @@ export const CustomersScreen = () => {
           </View>
         </View>
         </KeyboardAvoidingView>
+
+        {/* iOS can't present a sibling Modal over one that is already up, so
+            while the customer sheet is open the order sheet must live inside
+            it; a ledger row then opens the order over the customer. */}
+        {selectedCustomer ? (
+          <OrderDetailSheet
+            visible={!!orderDetail}
+            order={orderDetail}
+            onClose={() => setOrderDetail(null)}
+          />
+        ) : null}
       </Modal>
 
-      {/* Last in the tree so it lands above the customer sheet: a ledger row
-          opens the order without losing the customer behind it. */}
-      <OrderDetailSheet
-        visible={!!orderDetail}
-        order={orderDetail}
-        onClose={() => setOrderDetail(null)}
-      />
+      {/* The Orders tab opens the same sheet with no customer sheet up. */}
+      {!selectedCustomer ? (
+        <OrderDetailSheet
+          visible={!!orderDetail}
+          order={orderDetail}
+          onClose={() => setOrderDetail(null)}
+        />
+      ) : null}
     </View>
   );
 };
